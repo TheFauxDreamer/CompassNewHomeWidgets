@@ -119,6 +119,18 @@ The Attendance, Unmarked Rolls, Arrivals & Departures and Recent Chronicle widge
 
 Each widget keeps its own selection. A change in one widget does not change the other widgets.
 
+### Custom groups (Attendance and Arrivals & Departures)
+
+The Attendance and Arrivals & Departures widgets can also filter by the student Custom Groups in Compass (People > Custom Groups):
+
+1. Click the chip below the widget title.
+2. Click **Custom groups**, then select one or more groups. The widget shows the students who are in at least one of the groups. If there are many groups, type in the search box to find a group.
+3. Click **Done**.
+
+To filter by year group again, click **Year groups** and select the year groups. If you clear the last group, the widget shows all year groups.
+
+The list shows the student Custom Groups that you can see in Compass, with the number of students in each group.
+
 ## Move or remove a widget
 
 The extension widgets work in the same way as the Compass widgets in the layout editor:
@@ -177,6 +189,7 @@ Do not only delete the lines that have the comment `DEBUG`. Other lines use the 
 | --- | --- |
 | `manifest.json` | The extension settings and the list of scripts, in load order. |
 | `src/shared/years.js` | The year-group order, the year-group labels and the filter chip. All widgets use this file. The Recent Chronicle widget also uses the filter chip for entry types. |
+| `src/shared/groups.js` | The Compass Custom Groups for the Attendance and Arrivals & Departures filters. |
 | `src/shared/theme.js` | The base look (`CompassTheme.CSS`) and the icons (`CompassTheme.ICONS`) for all widgets. |
 | `src/widgets/attendance/data.js` | Gets the attendance data from Compass and counts it. Contains the list of attendance codes. |
 | `src/widgets/attendance/chart.js` | The Attendance chart, for the homepage widget and the toolbar panel. |

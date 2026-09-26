@@ -59,6 +59,13 @@ globalThis.CompassYears = (() => {
     .ypanel .yall { grid-column: 1 / -1; font-weight: 600; }
     .ypanel .ynote { grid-column: 1 / -1; color: #5f6368; }
     .ypanel .ydone { align-self: flex-start; }
+    /* Year groups | Custom groups switch, and the group list (widgets that pass groups). */
+    .ypanel .ymode { align-self: flex-start; margin: 2px 0 4px; }
+    .ypanel .ysearch { box-sizing: border-box; width: 100%; margin: 4px 0 2px; padding: 4px 8px; border: 1px solid #dadce0;
+      border-radius: 6px; font: inherit; color: inherit; }
+    .ypanel .ysearch:focus { outline: 2px solid #0E6CD9; outline-offset: -1px; border-color: transparent; }
+    .ypanel .ytype { color: #5f6368; font-size: 11px; margin-left: auto; padding-left: 6px; white-space: nowrap; }
+    .ypanel .ygone span { color: #b3261e; }
   `;
 
   // onChange(next) gives an array of year-group names, or null for "all year groups".
@@ -69,11 +76,21 @@ globalThis.CompassYears = (() => {
   //   allText, noneText, noun: the texts. sortFn, labelFn: the order and the chip label.
   //   wide: show one option on each line. onOpen: the widget closes its other filters here.
   //   iconFn(option): an element to show before the option's name, or null.
+  // groups: pass globalThis.CompassGroups to add a "Custom groups" mode (it's ignored
+  //   while CompassGroups.available is false). The selection can then also be a group
+  //   selection (see groups.js), and onChange can give one. Ticking a year group goes
+  //   back to year groups; unticking the last group goes back to all year groups.
   function filter({
     onChange, allText = "All year groups", noneText = "No year groups", noun = "Year groups",
-    sortFn = sort, labelFn = label, wide = false, onOpen = () => {}, iconFn = () => null,
+    sortFn = sort, labelFn = label, wide = false, onOpen = () => {}, iconFn = () => null, groups = null,
   }) {
+    const G = groups?.available ? groups : null;
     let options = [], selected = null;
+    let mode = "years";       // which list the panel shows
+    let groupList = null;     // [{ id, name, type }] once loaded
+    let groupError = "";
+    let search = "";
+    const isGroups = (sel) => !!G && G.isGroups(sel);
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
     const chip = el("button", "ychip");
     chip.type = "button";
@@ -82,6 +99,74 @@ globalThis.CompassYears = (() => {
     panel.hidden = true;
 
     const choose = (next) => onChange(options.every((y) => next.includes(y)) ? null : sortFn(next));
+
+    // --- Custom groups mode ---
+    function modeSwitch() {
+      const seg = el("div", "seg ymode");
+      for (const [m, text] of [["years", "Year groups"], ["groups", "Custom groups"]]) {
+        const b = el("button", null, text);
+        b.type = "button";
+        b.setAttribute("aria-pressed", String(mode === m));
+        b.onclick = () => { if (mode !== m) { mode = m; drawPanel(); } };
+        seg.append(b);
+      }
+      return seg;
+    }
+
+    function loadGroups() {
+      if (groupList || groupError === "loading") return;
+      groupError = "loading";
+      G.list()
+        .then((list) => { groupList = list; groupError = ""; })
+        .catch((e) => { groupError = e.message || String(e); })
+        .finally(() => { if (!panel.hidden && mode === "groups") drawPanel(); });
+    }
+
+    function toggleGroup(g, on) {
+      const cur = isGroups(selected) ? selected : { ids: [], names: {} };
+      const ids = on ? [...new Set([...cur.ids, g.id])] : cur.ids.filter((id) => id !== g.id);
+      const names = { ...cur.names, [g.id]: g.name };
+      for (const id of Object.keys(names)) if (!ids.includes(id)) delete names[id];
+      onChange(ids.length ? { kind: "groups", ids, names } : null);
+    }
+
+    function drawGroupList(list) {
+      list.textContent = "";
+      const chosen = isGroups(selected) ? selected : { ids: [], names: {} };
+      const q = search.trim().toLowerCase();
+      // Selected groups that Compass no longer lists, so they can be unticked.
+      const gone = groupList ? chosen.ids.filter((id) => !groupList.some((g) => g.id === id)) : [];
+      for (const id of gone) {
+        const b = box(`${chosen.names[id] || "Unknown group"} (not in Compass now)`, true, (on) => toggleGroup({ id, name: chosen.names[id] }, on), "ygone");
+        list.append(b);
+      }
+      const shown = (groupList || []).filter((g) => !q || g.name.toLowerCase().includes(q) || g.type.toLowerCase().includes(q));
+      for (const g of shown) {
+        const b = box(g.name, chosen.ids.includes(g.id), (on) => toggleGroup(g, on));
+        if (g.type) b.append(el("span", "ytype", g.type));
+        list.append(b);
+      }
+      if (!shown.length && !gone.length) list.append(el("div", "ynote", q ? "No groups match." : "Compass has no student Custom Groups that you can see."));
+    }
+
+    function drawGroups() {
+      if (!groupList) {
+        loadGroups();
+        return el("div", "ynote", groupError && groupError !== "loading" ? `Couldn't load the groups: ${groupError}` : "Loading groups…");
+      }
+      const wrap = el("div");
+      if (groupList.length > 15) {
+        const input = Object.assign(el("input", "ysearch"), { type: "search", placeholder: "Search groups", value: search });
+        input.setAttribute("aria-label", "Search groups");
+        input.oninput = () => { search = input.value; drawGroupList(list); };
+        wrap.append(input);
+      }
+      const list = el("div", "ygrid");
+      list.style.gridTemplateColumns = "1fr";
+      wrap.append(list);
+      drawGroupList(list);
+      return wrap;
+    }
 
     function box(text, checked, onToggle, cls, icon) {
       const label = el("label", cls);
@@ -95,14 +180,24 @@ globalThis.CompassYears = (() => {
 
     function drawPanel() {
       panel.textContent = "";
+      if (G) panel.append(modeSwitch());
+      if (G && mode === "groups") {
+        const done = el("button", "ydone", "Done");
+        done.type = "button";
+        done.onclick = () => { open(false); chip.focus(); };
+        panel.append(drawGroups(), done);
+        return;
+      }
+      // While groups are selected, the year boxes start empty: ticking one filters by year groups.
+      const years = isGroups(selected) ? [] : selected;
       const grid = el("div", "ygrid");
       if (!options.length) {
         grid.append(el("div", "ynote", `${noun} show once the data has loaded.`));
       } else {
-        grid.append(box(allText, selected === null, (on) => onChange(on ? null : []), "yall"));
+        grid.append(box(allText, years === null, (on) => onChange(on ? null : []), "yall"));
         for (const y of options) {
-          grid.append(box(y, selected === null || selected.includes(y), (on) => {
-            const cur = new Set(selected ?? options);
+          grid.append(box(y, years === null || years.includes(y), (on) => {
+            const cur = new Set(years ?? options);
             on ? cur.add(y) : cur.delete(y);
             choose([...cur]);
           }, undefined, iconFn(y)));
@@ -118,13 +213,18 @@ globalThis.CompassYears = (() => {
       const all = selected === null;
       chip.className = all ? "ychip all" : "ychip";
       chip.textContent = "";
-      chip.append(el("span", null, all ? allText : selected.length ? labelFn(selected) : noneText));
-      chip.title = (all ? allText : selected.join(", ") || noneText) + " · click to change";
+      if (isGroups(selected)) {
+        chip.append(el("span", null, G.label(selected)));
+        chip.title = G.label(selected) + " · click to change";
+      } else {
+        chip.append(el("span", null, all ? allText : selected.length ? labelFn(selected) : noneText));
+        chip.title = (all ? allText : selected.join(", ") || noneText) + " · click to change";
+      }
       if (!panel.hidden) drawPanel();
     }
 
     function open(on = panel.hidden) {
-      if (on) { onOpen(); drawPanel(); }
+      if (on) { onOpen(); mode = isGroups(selected) ? "groups" : "years"; search = ""; drawPanel(); }
       panel.hidden = !on;
       chip.setAttribute("aria-expanded", String(on));
     }

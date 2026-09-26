@@ -211,6 +211,9 @@ globalThis.CompassAttendance = (() => {
     return students.filter((s) => set.has(yearOf(s)));
   }
 
+  // users: a Set of Compass user IDs, for example the members of Custom Groups (groups.js).
+  const filterByUsers = (students, users) => students.filter((s) => users.has(Number(s.userId)));
+
   async function load(now = new Date()) {
     const ids = await fetchStudentIds();
     const thisMonday = mondayOf(now);
@@ -225,7 +228,7 @@ globalThis.CompassAttendance = (() => {
     return result;
   }
 
-  return { load, summarise, tally, yearLevels, filterByYears, CATEGORIES, CATEGORY_BY_STATUS_ID, STATUSES };
+  return { load, summarise, tally, yearLevels, filterByYears, filterByUsers, CATEGORIES, CATEGORY_BY_STATUS_ID, STATUSES };
 })();
 
 if (typeof module !== "undefined") module.exports = globalThis.CompassAttendance;

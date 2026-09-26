@@ -33,7 +33,8 @@ globalThis.CompassAttendanceUI = (() => {
   const { CSS, ICONS } = globalThis.CompassTheme;
 
   function mountSnapshot(host, { mode = "panel", onClose, preview = false } = {}) {
-    const { load, tally, yearLevels, filterByYears, CATEGORIES } = globalThis.CompassAttendance;
+    const { load, tally, yearLevels, filterByYears, filterByUsers, CATEGORIES } = globalThis.CompassAttendance;
+    const G = globalThis.CompassGroups;
     const root = host.shadowRoot || host.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>${CSS}${CHART_CSS}${globalThis.CompassYears.CSS}</style>
@@ -98,7 +99,7 @@ globalThis.CompassAttendanceUI = (() => {
 
     let data = null;       // { date, half, students } from Compass
     let allYears = [];
-    let selected = null;   // array of year names; null = all year groups
+    let selected = null;   // array of year names; null = all year groups; or a group selection (groups.js)
     let view = "groups";   // "groups" | "codes"
     let lastSkeleton = null;
     const fmtTime = (d) => d.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }).replace(/\s/g, "").toLowerCase();
@@ -125,7 +126,7 @@ globalThis.CompassAttendanceUI = (() => {
         if (area !== "local" || !(STORAGE_KEY in changes) || !data) return;
         const next = changes[STORAGE_KEY].newValue ?? null;
         if (JSON.stringify(next) === JSON.stringify(selected)) return;
-        selected = next;
+        selected = G.validSelection(next);
         showYears();
         renderChart();
       };
@@ -135,11 +136,12 @@ globalThis.CompassAttendanceUI = (() => {
     const currentSelection = () =>
       selected ? allYears.filter((y) => selected.includes(y)) : allYears.slice();
 
-    // --- year-group filter (all widgets use this filter) -------------------------
-    const yearFilter = globalThis.CompassYears.filter({ onChange: (next) => setSelection(next) });
+    // --- year-group or Compass group filter (all widgets use this filter) -----------
+    const yearFilter = globalThis.CompassYears.filter({ onChange: (next) => setSelection(next), groups: G });
     $("yrow").append(yearFilter.chip);
     $("yarea").append(yearFilter.panel);
-    const showYears = () => yearFilter.set(allYears, data && selected ? currentSelection() : selected);
+    const showYears = () => yearFilter.set(allYears, data && Array.isArray(selected) ? currentSelection() : selected);
+    const groupMembers = G.tracker(() => { if (data) renderChart(); });
 
     function setSelection(next) {
       selected = next;
@@ -315,10 +317,20 @@ globalThis.CompassAttendanceUI = (() => {
     }
 
     function renderChart() {
-      const sel = currentSelection();
+      let students = null; // null: nothing selected
+      if (G.isGroups(selected)) {
+        let members;
+        try { members = groupMembers.get(selected); }
+        catch (e) { drawChart([`Couldn't load the members of ${G.label(selected)}: ${e.message || e}`], null, { isError: true }); return; }
+        if (!members) { drawChart([sessionLabel(data.date, data.half), `Loading ${G.label(selected)}…`], null); return; }
+        students = filterByUsers(data.students, members);
+      } else {
+        const sel = currentSelection();
+        if (sel.length) students = filterByYears(data.students, sel);
+      }
 
-      const none = sel.length === 0;
-      const res = tally(none ? [] : filterByYears(data.students, sel), data.date, data.half);
+      const none = !students;
+      const res = tally(none ? [] : students, data.date, data.half);
       const notCounted = none ? 0 : res.counts.excluded;
       drawChart([
         sessionLabel(data.date, data.half),
@@ -353,7 +365,8 @@ globalThis.CompassAttendanceUI = (() => {
         lastUpdated = new Date();
         refreshError = "";
         allYears = yearLevels(data.students);
-        selected = Array.isArray(saved) ? saved : null;
+        selected = G.validSelection(saved);
+        groupMembers.reset(); // ask for the group members again (cached for a few minutes)
         showYears();
         renderChart();
       } catch (e) {
@@ -373,8 +386,8 @@ globalThis.CompassAttendanceUI = (() => {
     } catch (_) {}
     if (preview) { renderSkeleton("Preview – the live chart shows on the homepage"); return { refresh }; }
 
-    // Show the saved year groups in the chip straight away, before Compass answers.
-    loadSaved().then((s) => { if (!data && Array.isArray(s)) { selected = s; showYears(); } });
+    // Show the saved selection in the chip straight away, before Compass answers.
+    loadSaved().then((s) => { const v = G.validSelection(s); if (!data && v) { selected = v; showYears(); } });
     refresh();
 
     // Auto-refresh. Browsers slow timers in background tabs, so also catch up

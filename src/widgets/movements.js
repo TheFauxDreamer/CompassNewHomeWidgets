@@ -53,7 +53,8 @@ globalThis.CompassMovements = (() => {
 
   // Keeps the arrivals and departures of today (local time), newest first.
   // years: the year-level names to keep (null = all).
-  function summarise(items, yearNames, now = new Date(), years = null) {
+  // users: a Set of Compass user IDs to keep instead (the members of Custom Groups), or null.
+  function summarise(items, yearNames, now = new Date(), years = null, users = null) {
     const today = now.toDateString();
     let rows = items
       .map((it) => ({
@@ -75,7 +76,9 @@ globalThis.CompassMovements = (() => {
       r.returned = r.type === "departure" && rows.some((a) => a.uid === r.uid && a.type === "arrival" && a.time > r.time);
     }
     const all = rows.length;
-    if (years) {
+    if (users) {
+      rows = rows.filter((r) => users.has(Number(r.uid)));
+    } else if (years) {
       const keep = new Set(years);
       rows = rows.filter((r) => keep.has(r.year));
     }
@@ -84,7 +87,7 @@ globalThis.CompassMovements = (() => {
       rows,
       arrivals: rows.filter((r) => r.type === "arrival").length,
       departures: rows.filter((r) => r.type === "departure").length,
-      otherYears: all - rows.length, // rows that the year-group filter removes
+      filteredOut: all - rows.length, // rows that the year-group or group filter removes
       updated: now,
     };
   }
@@ -198,26 +201,29 @@ globalThis.CompassMovementsUI = (() => {
     const VIEW_KEY = "movementsView"; // "all" | "arrival" | "departure"
     let view = "all";
 
-    // --- year-group filter (the same filter as the other widgets, with its own selection) ---
-    const YEARS_KEY = "movementsYearGroups"; // array of year names; null = all
+    // --- year-group or Compass group filter (the same filter as the other widgets, with its own selection) ---
+    const YEARS_KEY = "movementsYearGroups"; // array of year names; null = all; or a group selection (groups.js)
+    const G = globalThis.CompassGroups;
     let years = null;
+    const groupMembers = G.tracker(() => { if (lastData) render(); });
     const { sort: sortYears, label: yearsLabel } = globalThis.CompassYears;
 
     // All the year levels that we know: the list of the school and the years in the rows.
     function yearOptions() {
       const set = new Set([...(lastData?.yearNames?.values() || [])].filter(Boolean));
       for (const it of lastData?.items || []) set.add(lastData.yearNames.get(it.yearLevelId) || "No YL");
-      for (const y of years || []) set.add(y);
+      if (Array.isArray(years)) for (const y of years) set.add(y);
       return sortYears(set);
     }
 
-    const yearFilter = globalThis.CompassYears.filter({ onChange: (next) => setYears(next, true) });
+    const yearFilter = globalThis.CompassYears.filter({ onChange: (next) => setYears(next, true), groups: G });
     $("yrow").prepend(yearFilter.chip);
     $("yarea").append(yearFilter.panel);
     const showYears = () => yearFilter.set(lastData ? yearOptions() : [], years);
 
     function setYears(next, save) {
-      years = next === null ? null : sortYears(next);
+      next = G.validSelection(next);
+      years = Array.isArray(next) ? sortYears(next) : next;
       if (save) { try { chrome.storage.local.set({ [YEARS_KEY]: years }); } catch (_) {} }
       showYears();
       if (lastData) render();
@@ -240,7 +246,7 @@ globalThis.CompassMovementsUI = (() => {
     try {
       chrome.storage.local.get([VIEW_KEY, YEARS_KEY], (r) => {
         setView(r?.[VIEW_KEY], false);
-        if (Array.isArray(r?.[YEARS_KEY])) setYears(r[YEARS_KEY], false);
+        if (G.validSelection(r?.[YEARS_KEY])) setYears(r[YEARS_KEY], false);
       });
       const onChanged = (changes, area) => {
         if (!host.isConnected && !host.parentNode) { chrome.storage.onChanged.removeListener(onChanged); return; }
@@ -316,7 +322,13 @@ globalThis.CompassMovementsUI = (() => {
     }
 
     function render() {
-      const res = summarise(lastData.items, lastData.yearNames, lastData.now, years);
+      let users = null;
+      if (G.isGroups(years)) {
+        try { users = groupMembers.get(years); }
+        catch (e) { message("", "Couldn't load the group", e.message || String(e), { error: true }); return; }
+        if (!users) { skeleton(); return; } // render() runs again when the members arrive
+      }
+      const res = summarise(lastData.items, lastData.yearNames, lastData.now, Array.isArray(years) ? years : null, users);
       const now = new Date();
       const rows = view === "all" ? res.rows : res.rows.filter((r) => r.type === view);
       const what = view === "arrival" ? "late arrival" : view === "departure" ? "early departure" : "arrival or departure";
@@ -324,8 +336,9 @@ globalThis.CompassMovementsUI = (() => {
       const label = view === "all" ? "today" : rows.length === 1 ? what : plural; // "8 in · 12 out" is already in the meta text.
       const meta = `${res.arrivals} in · ${res.departures} out · ${fmtDay(res.updated)}`;
       if (!rows.length) {
-        const which = years === null ? "" : ` for ${years.length ? yearsLabel(years) : "the selected year groups"}`;
-        const others = res.otherYears ? ` · ${res.otherYears} in other year groups` : "";
+        const which = users ? ` for ${G.label(years)}`
+          : years === null ? "" : ` for ${years.length ? yearsLabel(years) : "the selected year groups"}`;
+        const others = res.filteredOut ? ` · ${res.filteredOut} ${users ? "not in the selected groups" : "in other year groups"}` : "";
         message("0", plural, `No ${plural} today${which}${others}`);
         $("summary").lastChild.textContent = meta;
       } else {
@@ -343,6 +356,7 @@ globalThis.CompassMovementsUI = (() => {
       if (!lastLoaded) setFoot(footText());
       try {
         lastData = await load();
+        groupMembers.reset(); // ask for the group members again (cached for a few minutes)
         render();
         showYears(); // The year list can have more years now.
       } catch (e) {

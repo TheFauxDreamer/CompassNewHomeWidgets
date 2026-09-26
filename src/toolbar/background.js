@@ -19,7 +19,7 @@ chrome.action.onClicked.addListener(async (tab) => {
   chrome.action.setBadgeText({ tabId: tab.id, text: "" });
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    files: ["src/shared/years.js", "src/shared/theme.js", "src/widgets/attendance/data.js", "src/widgets/attendance/chart.js", "src/toolbar/panel.js"],
+    files: ["src/shared/years.js", "src/shared/groups.js", "src/shared/theme.js", "src/widgets/attendance/data.js", "src/widgets/attendance/chart.js", "src/toolbar/panel.js"],
   });
 });
 
