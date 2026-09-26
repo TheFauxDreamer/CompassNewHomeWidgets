@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Compass Homepage Widgets",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "description": "Useful live widgets for the Compass homepage: attendance snapshot, unmarked rolls, relief classes, WA weather and calendar event dots, plus an attendance panel from the toolbar.",
   "permissions": [
     "activeTab",
@@ -12,20 +12,20 @@
     "https://reg.bom.gov.au/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/toolbar/background.js"
   },
   "action": {
     "default_title": "Attendance snapshot",
     "default_icon": {
-      "16": "icon16.png",
-      "48": "icon48.png",
-      "128": "icon128.png"
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     }
   },
   "icons": {
-    "16": "icon16.png",
-    "48": "icon48.png",
-    "128": "icon128.png"
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   },
   "content_scripts": [
     {
@@ -33,16 +33,17 @@
         "https://*.compass.education/*"
       ],
       "js": [
-        "years.js",
-        "attendance.js",
-        "ui.js",
-        "unmarked.js",
-        "movements.js",
-        "chronicle.js",
-        "relief.js",
-        "weather.js",
-        "homepage.js",
-        "calendar-dots.js"
+        "src/shared/years.js",
+        "src/shared/theme.js",
+        "src/widgets/attendance/data.js",
+        "src/widgets/attendance/chart.js",
+        "src/widgets/unmarked.js",
+        "src/widgets/movements.js",
+        "src/widgets/chronicle.js",
+        "src/widgets/relief.js",
+        "src/widgets/weather.js",
+        "src/homepage/homepage.js",
+        "src/homepage/calendar-dots.js"
       ],
       "run_at": "document_idle"
     }

@@ -4,7 +4,7 @@ This file lists ideas for new widgets. No widget in this list is built yet.
 Before we build a widget, we must confirm that Compass supplies the necessary data.
 To confirm this, record a HAR file of the related Compass page (see "Record a HAR file" below).
 
-When a widget is built, move it to the "Widgets and features" section of README.md and remove it from this file.
+When a widget is built, move it to the "Widgets and features" section of ../README.md and remove it from this file.
 
 ## Status
 
@@ -15,8 +15,8 @@ When a widget is built, move it to the "Widgets and features" section of README.
 
 | Widget | What it shows | Data |
 | --- | --- | --- |
-| **Unexplained absences today** | The students with a U, W or P code, or with no mark after the roll, in groups by year group. The office can then contact the families. | The attendance grid in `attendance.js`. The query must also get the student names. A HAR file must confirm the name field. |
-| **Attendance trend** | A small line chart of the whole-school % present for the last 10 sessions (this week and last week). It uses the year-group filter. | The same two weeks of data that `attendance.js` already gets. |
+| **Unexplained absences today** | The students with a U, W or P code, or with no mark after the roll, in groups by year group. The office can then contact the families. | The attendance grid in `src/widgets/attendance/data.js`. The query must also get the student names. A HAR file must confirm the name field. |
+| **Attendance trend** | A small line chart of the whole-school % present for the last 10 sessions (this week and last week). It uses the year-group filter. | The same two weeks of data that `src/widgets/attendance/data.js` already gets. |
 | **Attendance watchlist** | The students with less than 90% (or less than 80%) attendance for the term, by year group. | Many weeks of the attendance grid (slow), or a term summary request. HAR necessary: Attendance > Reports, or the attendance summary of a student. |
 
 ## High value (HAR necessary)
@@ -56,9 +56,9 @@ These ideas change the Compass widgets, as the Term Calendar dots do:
 
 ## Rules for each new widget
 
-- Add the widget to the `CARDS` list in `homepage.js`. This gives the widget the move and hide actions in the layout editor.
-- Use the `mount(host, { preview })` function that returns `{ refresh, stop }`. Use `unmarked.js` or `movements.js` as the model.
-- For year groups, use `CompassYears.filter` from `years.js`. Give each widget its own storage key.
+- Add the widget to the `CARDS` list in `src/homepage/homepage.js`. This gives the widget the move and hide actions in the layout editor.
+- Use the `mount(host, { preview })` function that returns `{ refresh, stop }`. Use `src/widgets/unmarked.js` or `src/widgets/movements.js` as the model.
+- For year groups, use `CompassYears.filter` from `src/shared/years.js`. Give each widget its own storage key.
 - Keep the card at the same height in all states: loading, data, error, and with the filter open.
 - Show student names only when the purpose of the widget needs them.
 - Update README.md when you add the widget.

@@ -212,7 +212,7 @@ globalThis.CompassReliefUI = (() => {
 
   function mount(host, { preview = false } = {}) {
     const { load, summarise, nextSchoolDay, keyOf, REFRESH_MINUTES } = globalThis.CompassRelief;
-    const { CSS, ICONS } = globalThis.CompassAttendanceUI;
+    const { CSS, ICONS } = globalThis.CompassTheme;
     const root = host.shadowRoot || host.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>${CSS}${globalThis.CompassYears.CSS}${CSS_EXTRA}</style>

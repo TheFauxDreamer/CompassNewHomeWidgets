@@ -166,7 +166,7 @@ globalThis.CompassMovementsUI = (() => {
 
   function mount(host, { preview = false } = {}) {
     const { load, summarise, REFRESH_MINUTES, NEW_MINUTES } = globalThis.CompassMovements;
-    const { CSS, ICONS } = globalThis.CompassAttendanceUI;
+    const { CSS, ICONS } = globalThis.CompassTheme;
     const root = host.shadowRoot || host.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>${CSS}${globalThis.CompassYears.CSS}${CSS_EXTRA}</style>

@@ -315,7 +315,7 @@
     schedule();
   }
 
-  // The same base look as the other widgets (ui.js): Cabin text, Compass's colours,
+  // The same base look as the other widgets (src/shared/theme.js): Cabin text, Compass's colours,
   // grey rounded buttons (the panel's Done button).
   const FILTER_CSS = `
     :host { all: initial; display: block; }

@@ -378,7 +378,7 @@ globalThis.CompassChronicleUI = (() => {
 
   function mount(host, { preview = false } = {}) {
     const { load, summarise, REFRESH_MINUTES, NEW_MINUTES } = globalThis.CompassChronicle;
-    const { CSS, ICONS } = globalThis.CompassAttendanceUI;
+    const { CSS, ICONS } = globalThis.CompassTheme;
     const Y = globalThis.CompassYears;
     const root = host.shadowRoot || host.attachShadow({ mode: "open" });
     root.innerHTML = `

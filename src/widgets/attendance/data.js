@@ -45,7 +45,7 @@ globalThis.CompassAttendance = (() => {
   const STATUS_BY_ID = Object.fromEntries(STATUSES.map((row) => [row[0], row]));
 
   // Colour-blind safe (Okabe-Ito based): blues for at school, orange for absent,
-  // so nothing relies on telling red from green. Unapproved is also striped (ui.js).
+  // so nothing relies on telling red from green. Unapproved is also striped (chart.js).
   const CATEGORIES = [
     { key: "present",    label: "Present",            color: "#0072B2" },
     { key: "offsite",    label: "Excursion",          color: "#56B4E9" },

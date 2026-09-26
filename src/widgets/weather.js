@@ -254,7 +254,7 @@ globalThis.CompassWeatherUI = (() => {
 
   function mount(host, { preview = false } = {}) {
     const { load, PERTH, REFRESH_MINUTES } = globalThis.CompassWeather;
-    const { CSS, ICONS: UI_ICONS } = globalThis.CompassAttendanceUI;
+    const { CSS, ICONS: UI_ICONS } = globalThis.CompassTheme;
     const root = host.shadowRoot || host.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>${CSS}${globalThis.CompassYears.CSS}${CSS_EXTRA}</style>
@@ -298,8 +298,8 @@ globalThis.CompassWeatherUI = (() => {
     };
 
     // With no town chosen, look for a BOM town in the school name that the homepage
-    // shows (e.g. "Seventh Heaven School Mandurah" -> Mandurah). The longest match wins, so
-    // "Port Hedland" beats "Hedland".
+    // shows (e.g. "Seventh Heaven School Kalm" -> Kalm). The longest match wins, so
+    // "North Corel" beats "Corel".
     function guessTown(townList) {
       const school = (document.querySelector(".home-schoolNameWrapper h3")?.textContent || "").toLowerCase();
       if (!school) return null;

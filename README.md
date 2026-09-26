@@ -141,7 +141,7 @@ To install an update, get the new files, then click the reload button on the ext
 
 ## Change the attendance groups
 
-The `STATUSES` list in `attendance.js` puts each Compass attendance code into a group.
+The `STATUSES` list in `src/widgets/attendance/data.js` puts each Compass attendance code into a group.
 To change the groups for your school policy, edit this list.
 The **(i)** panel shows the changes automatically.
 
@@ -152,7 +152,7 @@ If Compass sends a code that is not in the list, the Attendance widget shows a n
 The Relief widget has a date box in its header, with a dashed red border. Use it to see the relief of a different day, for example in the school holidays.
 The date box is for testing only. Hide it before you release the extension:
 
-1. Open `relief.js`.
+1. Open `src/widgets/relief.js`.
 2. Find `const DEBUG_DATE = true;` near the start of `CompassReliefUI`.
 3. Change `true` to `false`.
 4. Reload the extension on the `chrome://extensions` page.
@@ -163,30 +163,43 @@ Do not only delete the lines that have the comment `DEBUG`. Other lines use the 
 
 ## Files
 
-| File | Purpose |
+| Folder or file | Purpose |
 | --- | --- |
-| `manifest.json` | The extension settings and the list of scripts. |
-| `years.js` | The year-group order, the year-group labels and the filter chip. All widgets use this file. The Recent Chronicle widget also uses the filter chip for entry types. |
-| `attendance.js` | Gets the attendance data from Compass and counts it. Contains the list of attendance codes. |
-| `ui.js` | The Attendance chart, for the homepage widget and the toolbar panel. |
-| `unmarked.js` | The Unmarked Rolls widget. |
-| `movements.js` | The Arrivals & Departures widget. |
-| `chronicle.js` | The Recent Chronicle widget. |
-| `relief.js` | The Relief widget. |
-| `weather.js` | The Weather widget. `background.js` gets the BOM files for it. |
-| `homepage.js` | Adds the widgets to the Compass homepage and to the layout editor. Moves and hides the widgets. |
-| `calendar-dots.js` | Adds the event dots to the Term Calendar widget. |
-| `background.js`, `panel.js` | Open the Attendance chart from the toolbar icon. |
+| `manifest.json` | The extension settings and the list of scripts, in load order. |
+| `src/shared/years.js` | The year-group order, the year-group labels and the filter chip. All widgets use this file. The Recent Chronicle widget also uses the filter chip for entry types. |
+| `src/shared/theme.js` | The base look (`CompassTheme.CSS`) and the icons (`CompassTheme.ICONS`) for all widgets. |
+| `src/widgets/attendance/data.js` | Gets the attendance data from Compass and counts it. Contains the list of attendance codes. |
+| `src/widgets/attendance/chart.js` | The Attendance chart, for the homepage widget and the toolbar panel. |
+| `src/widgets/unmarked.js` | The Unmarked Rolls widget. |
+| `src/widgets/movements.js` | The Arrivals & Departures widget. |
+| `src/widgets/chronicle.js` | The Recent Chronicle widget. |
+| `src/widgets/relief.js` | The Relief widget. |
+| `src/widgets/weather.js` | The Weather widget. `src/toolbar/background.js` gets the BOM files for it. |
+| `src/homepage/homepage.js` | Adds the widgets to the Compass homepage and to the layout editor. Moves and hides the widgets. |
+| `src/homepage/calendar-dots.js` | Adds the event dots to the Term Calendar widget. |
+| `src/toolbar/background.js`, `src/toolbar/panel.js` | Open the Attendance chart from the toolbar icon. `background.js` also gets the BOM files. |
+| `icons/` | The extension icons. |
+| `docs/PLANNED_WIDGETS.md` | Ideas for new widgets. |
+
+### Load order
+
+The scripts share global objects (for example `CompassYears` and `CompassTheme`), so the order in `manifest.json` is important:
+
+1. `src/shared/`: other scripts use these files.
+2. `src/widgets/`: `data.js` before `chart.js`, then the other widgets.
+3. `src/homepage/`: these files add the widgets to the page, so they load last.
+
+The toolbar panel loads its own list of scripts. This list is in `src/toolbar/background.js`.
 
 ## Planned widgets
 
-PLANNED_WIDGETS.md lists the ideas for new widgets and the data that each widget needs.
+[docs/PLANNED_WIDGETS.md](docs/PLANNED_WIDGETS.md) lists the ideas for new widgets and the data that each widget needs.
 
 ## Add a new widget
 
-1. Make a new script that has a `mount(host, { preview })` function. The function shows the widget in `host`.
-   It returns `{ refresh, stop }`.
-2. Add the script to `content_scripts` in `manifest.json`.
-3. Add the widget to the `CARDS` list in `homepage.js`.
-4. If the widget uses year groups, use `CompassYears.filter` from `years.js`.
-5. Add the widget to this README, and remove it from PLANNED_WIDGETS.md.
+1. Make a new script in `src/widgets/` that has a `mount(host, { preview })` function. The function shows the widget in `host`.
+   It returns `{ refresh, stop }`. Use `CompassTheme.CSS` and `CompassTheme.ICONS` from `src/shared/theme.js` for the base look.
+2. Add the script to `content_scripts` in `manifest.json`, after the other widgets and before `src/homepage/homepage.js`.
+3. Add the widget to the `CARDS` list in `src/homepage/homepage.js`.
+4. If the widget uses year groups, use `CompassYears.filter` from `src/shared/years.js`.
+5. Add the widget to this README, and remove it from `docs/PLANNED_WIDGETS.md`.
