@@ -137,8 +137,8 @@ The extension is not in a web store. Install it as an unpacked extension:
 4. Click **Load unpacked**, then select the repository folder.
 5. Open your Compass homepage.
 
-After a new install, the extension widgets are not on the homepage. A **Compass Homepage Widgets** welcome card shows at the top of the left column instead.
-Click **Edit home page**, then add the widgets from the **Add Widget** menu (see "Move or remove a widget").
+After a new install, the extension widgets are not on the homepage. A **Welcome!** card shows at the top of the left column instead.
+Click **Add custom widgets** to open the layout editor, then add the widgets from the **Add Widget** menu (see "Move or remove a widget").
 The welcome card goes away when you add a widget and click **Save**. To close it without adding a widget, click its close button.
 
 To install an update, get the new files, then click the reload button on the extension card.

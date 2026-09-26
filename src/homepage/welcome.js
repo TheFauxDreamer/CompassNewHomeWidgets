@@ -4,11 +4,23 @@
 globalThis.CompassWelcomeUI = (() => {
   const EDIT_URL = "/default.aspx?editing=true";
 
+  // Material "dashboard customize" icon.
+  const ADD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm15 0h-2v3h-3v2h3v3h2v-3h3v-2h-3z"/></svg>';
+
   const CSS_EXTRA = `
-    p { margin: 0 0 10px; }
-    .actions { display: flex; gap: 8px; }
-    .primary { background: #203249; color: #fff; padding: 6px 12px; }
-    .primary:hover { background: #2d4566; }
+    .hello { display: flex; align-items: center; gap: 12px; margin: 2px 0 14px; }
+    .wave { font-size: 28px; line-height: 1; flex: none; }
+    .hello p { margin: 0; color: #545F73; }
+    .cta { display: flex; width: 100%; align-items: center; justify-content: center; gap: 8px;
+      padding: 10px 16px; border-radius: 999px; font-weight: 600; font-size: 14px;
+      color: #fff; background: linear-gradient(135deg, #0E6CD9, #3d8ff0);
+      box-shadow: 0 2px 6px rgba(14, 108, 217, .35);
+      transition: transform .15s ease, box-shadow .15s ease, filter .15s ease; }
+    .cta:hover { background: linear-gradient(135deg, #0E6CD9, #3d8ff0); filter: brightness(1.06);
+      transform: translateY(-1px); box-shadow: 0 4px 12px rgba(14, 108, 217, .45); }
+    .cta:active { transform: none; box-shadow: 0 1px 3px rgba(14, 108, 217, .35); }
+    .cta:focus-visible { outline: 2px solid #0E6CD9; outline-offset: 2px; }
+    .cta svg { width: 18px; height: 18px; fill: currentColor; }
   `;
 
   // onDismiss(): called when the close button is clicked.
@@ -19,16 +31,14 @@ globalThis.CompassWelcomeUI = (() => {
       <style>${CSS}${CSS_EXTRA}</style>
       <div class="wrap widget">
         <header>
-          <h1>Compass Homepage Widgets</h1>
+          <h1>Welcome!</h1>
           <button id="close" title="Dismiss" aria-label="Dismiss">${ICONS.close}</button>
         </header>
-        <p>The extension adds widgets for attendance, unmarked rolls, arrivals and departures,
-          Chronicle, relief and weather.</p>
-        <p>To add them, edit the homepage, click <b>Add Widget</b>, select the widgets marked
-          "(extension)", then click <b>Save</b>.</p>
-        <div class="actions">
-          <button class="primary" id="edit">Edit home page</button>
+        <div class="hello">
+          <span class="wave" aria-hidden="true">👋</span>
+          <p>Add custom widgets for attendance, rolls, weather and more.</p>
         </div>
+        <button class="cta" id="edit">${ADD_ICON}Add custom widgets</button>
       </div>`;
     root.getElementById("edit").onclick = () => { location.href = EDIT_URL; };
     root.getElementById("close").onclick = () => onDismiss?.();
