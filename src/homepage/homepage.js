@@ -6,6 +6,10 @@
 // browser (per screen size, because Compass shows 1-4 columns depending on width).
 // With no saved position it goes at the top of the leftmost column.
 //
+// After a new install all our cards start removed, and a welcome card (welcome.js)
+// shows instead. It links to the layout editor, where the cards are added. It goes
+// away for good when it is dismissed or when a card is added and saved.
+//
 // The layout editor works like Compass's own: the delete button removes a card, and
 // removed cards can be added again from Compass's "Add Widget" menu. Moves and removals
 // are kept only when Compass's Save (or Save and Close) button is clicked.
@@ -66,7 +70,16 @@
   ].map((c) => ({ ...c, el: null, api: null, positions: {} }));
 
   const HIDDEN_KEY = "hiddenWidgets"; // ids of cards removed from the homepage
+  const NEW_INSTALL_KEY = "newInstall"; // set by background.js on a new install
+  const WELCOME_KEY = "welcomeDismissed";
   let hidden = new Set();
+  let welcomeDismissed = false;
+
+  // Not in CARDS: it can't be moved, removed or added from the editor.
+  const WELCOME = {
+    id: "compass-welcome-widget", positions: {}, after: null, el: null, api: null,
+    mount: (host) => globalThis.CompassWelcomeUI.mount(host, { onDismiss: dismissWelcome }),
+  };
   let ready = false; // don't draw anything until we know what's hidden
 
   let dragging = false;
@@ -80,9 +93,19 @@
   // drops them, as it does for Compass's widgets.
   let dirty = false;
   try {
-    chrome.storage.local.get([...CARDS.map((c) => c.posKey), HIDDEN_KEY], (r) => {
+    chrome.storage.local.get([...CARDS.map((c) => c.posKey), HIDDEN_KEY, NEW_INSTALL_KEY, WELCOME_KEY], (r) => {
       for (const c of CARDS) c.positions = r?.[c.posKey] || {};
       hidden = new Set(r?.[HIDDEN_KEY] || []);
+      welcomeDismissed = !!r?.[WELCOME_KEY];
+      // A new install starts with every card removed. Installs from before the welcome
+      // card have no flag, so their cards stay.
+      if (r?.[NEW_INSTALL_KEY]) {
+        if (!r[HIDDEN_KEY]) {
+          hidden = new Set(CARDS.map((c) => c.id));
+          chrome.storage.local.set({ [HIDDEN_KEY]: [...hidden] });
+        }
+        chrome.storage.local.remove(NEW_INSTALL_KEY);
+      }
       ready = true;
       schedule();
     });
@@ -90,6 +113,7 @@
       if (area !== "local" || dirty) return; // keep unsaved editor changes
       for (const c of CARDS) if (c.posKey in changes) c.positions = changes[c.posKey].newValue || {};
       if (HIDDEN_KEY in changes) hidden = new Set(changes[HIDDEN_KEY].newValue || []);
+      if (WELCOME_KEY in changes) welcomeDismissed = !!changes[WELCOME_KEY].newValue;
       schedule();
     });
   } catch (_) { ready = true; }
@@ -138,6 +162,7 @@
     if (!dirty) return;
     const changes = { [HIDDEN_KEY]: [...hidden] };
     for (const c of CARDS) changes[c.posKey] = c.positions;
+    if (CARDS.some((c) => !hidden.has(c.id))) changes[WELCOME_KEY] = true; // a card was added
     try { chrome.storage.local.set(changes); } catch (_) {}
     dirty = false;
   }
@@ -160,6 +185,12 @@
     def.api?.stop?.();
     def.el.remove();
     def.el = def.api = null;
+  }
+
+  function dismissWelcome() {
+    welcomeDismissed = true;
+    try { chrome.storage.local.set({ [WELCOME_KEY]: true }); } catch (_) {}
+    schedule();
   }
 
   // --- finding columns on the normal homepage ----------------------------------
@@ -489,6 +520,9 @@
   function place() {
     if (dragging || !ready) return;
     for (const def of CARDS) if (hidden.has(def.id)) removeCard(def);
+    const cardsShown = CARDS.some((c) => !hidden.has(c.id));
+    const welcome = !EDITING && !welcomeDismissed && !cardsShown;
+    if (!welcome) removeCard(WELCOME);
     if (EDITING && Date.now() - addMenuAt < 3000) addToMenu();
     const layout = document.querySelector(LAYOUT_SELECTOR);
     if (!layout) return;
@@ -496,6 +530,7 @@
     if (!found) return;
     const shown = CARDS.filter((def) => !hidden.has(def.id));
     if (EDITING) noteCompassChanges(found.columns, shown);
+    if (welcome) shown.unshift(WELCOME); // with no cards shown, it's the only one
     for (const def of shown) {
       if (!def.el) {
         def.el = EDITING

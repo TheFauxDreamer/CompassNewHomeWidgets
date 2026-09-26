@@ -81,7 +81,7 @@ Use it when the Compass Weather widget does not work because the campus address 
 - The widget shows the UV index for the district, with its level colour and the sun protection times.
 - The widget shows the wind and the humidity.
 - The rain, UV, wind and humidity show in four tiles. Click **Show details** to show the tiles, and **Hide details** to hide them. The browser keeps your choice.
-- The widget finds the town in the school name, if it can. To select a different town, click the town chip below the title.
+- The widget finds the town in the school name, if it can. To select a different town, click the location chip below the title. With no town, the chip says **Set your Location**.
   If you select **Perth**, you can also select a Perth area: Armadale, Fremantle, Joondalup, Kalamunda, Mandurah, Midland, Rockingham, Rottnest Island, Scarborough or Swanbourne. BOM does not forecast for smaller suburbs, so select the nearest area.
   You can also select the weather station for the current weather. **Automatic** uses the nearest station that measures the temperature.
 - After the forecast low time has passed, BOM does not give today's low. The widget then shows the lowest temperature measured overnight.
@@ -137,6 +137,10 @@ The extension is not in a web store. Install it as an unpacked extension:
 4. Click **Load unpacked**, then select the repository folder.
 5. Open your Compass homepage.
 
+After a new install, the extension widgets are not on the homepage. A **Compass Homepage Widgets** welcome card shows at the top of the left column instead.
+Click **Edit home page**, then add the widgets from the **Add Widget** menu (see "Move or remove a widget").
+The welcome card goes away when you add a widget and click **Save**. To close it without adding a widget, click its close button.
+
 To install an update, get the new files, then click the reload button on the extension card.
 
 ## Change the attendance groups
@@ -175,7 +179,8 @@ Do not only delete the lines that have the comment `DEBUG`. Other lines use the 
 | `src/widgets/chronicle.js` | The Recent Chronicle widget. |
 | `src/widgets/relief.js` | The Relief widget. |
 | `src/widgets/weather.js` | The Weather widget. `src/toolbar/background.js` gets the BOM files for it. |
-| `src/homepage/homepage.js` | Adds the widgets to the Compass homepage and to the layout editor. Moves and hides the widgets. |
+| `src/homepage/welcome.js` | The welcome card that shows after a new install. |
+| `src/homepage/homepage.js` | Adds the widgets to the Compass homepage and to the layout editor. Moves and hides the widgets. Shows the welcome card while no widget is on the homepage. |
 | `src/homepage/calendar-dots.js` | Adds the event dots to the Term Calendar widget. |
 | `src/toolbar/background.js`, `src/toolbar/panel.js` | Open the Attendance chart from the toolbar icon. `background.js` also gets the BOM files. |
 | `icons/` | The extension icons. |

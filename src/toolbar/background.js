@@ -1,3 +1,9 @@
+// A new install starts with the homepage widgets removed and shows a welcome card
+// instead (see homepage.js). Updates keep the current layout.
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+  if (reason === "install") chrome.storage.local.set({ newInstall: true });
+});
+
 // Clicking the toolbar icon injects the panel into the current Compass tab.
 // Running inside the page means requests use your existing Compass login.
 chrome.action.onClicked.addListener(async (tab) => {

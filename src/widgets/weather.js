@@ -263,7 +263,7 @@ globalThis.CompassWeatherUI = (() => {
           <h1>Weather</h1>
           ${preview ? "" : `<button id="refresh" title="Refresh now">${UI_ICONS.refresh}</button>`}
         </header>
-        <div class="yrow"><button class="ychip" id="where" title="Choose the town"><span>Choose a town</span></button></div>
+        <div class="yrow"><button class="ychip" id="where" title="Set your Location"><span>Set your Location</span></button></div>
         <div class="yarea">
           <div class="body compact" id="body"></div>
           <div class="ypanel" id="panel" hidden>
@@ -336,9 +336,9 @@ globalThis.CompassWeatherUI = (() => {
 
     function render() {
       const d = lastData;
-      $("where").firstElementChild.textContent = d.area ? d.area.name : d.town ? d.town.name : "Choose a town";
-      $("where").title = guessed ? "Found in the school name. Click to choose another town." : "Choose the town";
-      if (!d.town) { message("Choose the town for the forecast.", { button: "Choose town" }); setFoot(); return; }
+      $("where").firstElementChild.textContent = d.area ? d.area.name : d.town ? d.town.name : "Set your Location";
+      $("where").title = guessed ? "Found in the school name. Click to set your location." : "Set your Location";
+      if (!d.town) { message("Set your location for the forecast.", { button: "Set your Location" }); setFoot(); return; }
       const { day, obs, uv } = d;
       body.textContent = "";
 
