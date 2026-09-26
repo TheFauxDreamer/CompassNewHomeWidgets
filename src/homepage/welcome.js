@@ -9,7 +9,16 @@ globalThis.CompassWelcomeUI = (() => {
 
   const CSS_EXTRA = `
     .hello { display: flex; align-items: center; gap: 12px; margin: 2px 0 14px; }
-    .wave { font-size: 28px; line-height: 1; flex: none; }
+    /* The hand waves for under 2 seconds, then rests; once every 30 seconds. */
+    .wave { display: inline-block; font-size: 28px; line-height: 1; flex: none;
+      transform-origin: 70% 70%; animation: wave 30s ease-in-out infinite; }
+    @keyframes wave {
+      0%, 5.6%, 100% { transform: rotate(0); }
+      0.93%, 2.8% { transform: rotate(14deg); }
+      1.87% { transform: rotate(-8deg); }
+      3.73% { transform: rotate(-4deg); }
+      4.67% { transform: rotate(10deg); }
+    }
     .hello p { margin: 0; color: #545F73; }
     .cta { display: flex; width: 100%; align-items: center; justify-content: center; gap: 8px;
       padding: 10px 16px; border-radius: 999px; font-weight: 600; font-size: 14px;
@@ -21,6 +30,20 @@ globalThis.CompassWelcomeUI = (() => {
     .cta:active { transform: none; box-shadow: 0 1px 3px rgba(14, 108, 217, .35); }
     .cta:focus-visible { outline: 2px solid #0E6CD9; outline-offset: 2px; }
     .cta svg { width: 18px; height: 18px; fill: currentColor; }
+    /* A band of light slowly sweeps across the button once every 12 seconds. */
+    .cta { position: relative; overflow: hidden; }
+    .cta::after { content: ""; position: absolute; top: 0; bottom: 0; left: -60%; width: 45%;
+      background: linear-gradient(100deg, transparent, rgba(255,255,255,.18), transparent);
+      transform: skewX(-20deg); animation: shimmer 12s ease-in-out infinite; pointer-events: none; }
+    @keyframes shimmer {
+      0% { left: -60%; }
+      30%, 100% { left: 130%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .wave, .cta::after { animation: none; }
+      .cta::after { display: none; }
+      .cta, .cta:hover { transition: none; transform: none; }
+    }
   `;
 
   // onDismiss(): called when the close button is clicked.

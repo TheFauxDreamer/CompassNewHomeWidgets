@@ -98,6 +98,12 @@ A dot shows that a day has one or more events. Put the pointer on a day to see i
 To choose which calendars show dots, click the **All calendars** chip at the bottom of the widget and tick or untick the calendars.
 Your choice is saved in this browser. The list shows your school's calendars that appear on the homepage, each with its colour, plus any other kinds of event (for example, Events) that have loaded.
 
+### Countdown colours
+
+This feature lets each Compass "Countdown" widget have its own colour, so several countdowns are easy to tell apart.
+Put the pointer on a countdown, then click the round colour button at its top right. Select a colour from the list, or select **Compass default** to go back to the normal colour.
+The colour is saved in this browser, by the countdown's title. If you rename a countdown, choose its colour again.
+
 ### Toolbar panel
 
 Click the extension icon in the browser toolbar to open the Attendance chart on any Compass page.
@@ -182,6 +188,7 @@ Do not only delete the lines that have the comment `DEBUG`. Other lines use the 
 | `src/homepage/welcome.js` | The welcome card that shows after a new install. |
 | `src/homepage/homepage.js` | Adds the widgets to the Compass homepage and to the layout editor. Moves and hides the widgets. Shows the welcome card while no widget is on the homepage. |
 | `src/homepage/calendar-dots.js` | Adds the event dots to the Term Calendar widget. |
+| `src/homepage/countdown-colours.js` | Adds the colour choice to the Compass Countdown widgets. |
 | `src/toolbar/background.js`, `src/toolbar/panel.js` | Open the Attendance chart from the toolbar icon. `background.js` also gets the BOM files. |
 | `icons/` | The extension icons. |
 | `docs/PLANNED_WIDGETS.md` | Ideas for new widgets. |
