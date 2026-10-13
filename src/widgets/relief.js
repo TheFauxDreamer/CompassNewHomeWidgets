@@ -238,6 +238,8 @@ globalThis.CompassReliefUI = (() => {
         <div class="foot" id="foot"></div>
       </div>`;
     const $ = (id) => root.getElementById(id);
+    const N = globalThis.CompassNames;
+    N.attach(root);
     const footText = () => `Refreshes every ${REFRESH_MINUTES} min`;
     const setFoot = (text) => { $("foot").textContent = $("foot").title = text; }; // one line; full text on hover
 
@@ -447,6 +449,7 @@ globalThis.CompassReliefUI = (() => {
 
     function render() {
       const res = summarise(lastData.items, lastData.now, lastData.staff);
+      if (N.on()) res.classes = res.classes.map((c) => ({ ...c, away: c.away.map(N.staff), relief: c.relief.map(N.staff) })); // test names
       const now = new Date();
       const when = sameDay(lastData.day, now) ? "today" : `on ${fmtDay(lastData.day)}`;
       if (!res.classes.length) {
@@ -493,6 +496,7 @@ globalThis.CompassReliefUI = (() => {
 
     $("refresh").onclick = () => { if (!busy) refresh(); };
     refresh();
+    const offNames = N.onChange(() => { if (lastData && !busy) render(); });
 
     // Auto-refresh. Browsers slow timers in background tabs, so also catch up
     // as soon as the tab is looked at again.
@@ -500,7 +504,7 @@ globalThis.CompassReliefUI = (() => {
     const onVisible = () => { if (document.visibilityState === "visible" && due() && !busy) { showDay(); refresh(); } };
     const timer = setInterval(onVisible, 30 * 1000);
     document.addEventListener("visibilitychange", onVisible);
-    return { refresh, stop: () => { clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); } };
+    return { refresh, stop: () => { clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); offNames(); } };
   }
 
   return { mount };

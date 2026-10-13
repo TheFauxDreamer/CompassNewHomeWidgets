@@ -55,8 +55,29 @@ Compass sends only the entries that you have permission to see.
 - When an entry has more than one student, the row shows "+1", "+2" and so on. Put the pointer on the name to see all the students.
 - A **new** chip shows on entries from the last 30 minutes.
 - To see the full entry, click **View** (or click the row). The entry opens on the Chronicle page in a new tab.
-- The first chip below the title shows the year groups. The second chip shows the entry types. Click a chip to change the selection.
+- The first chip below the title shows the year groups or the Custom Groups. The second chip shows the entry types. Click a chip to change the selection.
 - The widget refreshes every 5 minutes. Click the refresh button to refresh it immediately.
+
+### Current Period
+
+This widget shows a timeline of the school day, with a red playhead at the current time.
+
+- The title line shows the period that is on now, its times and the time left. The next line shows the next period.
+- On the timeline, past periods are faded, the current period is dark blue and breaks are grey with stripes. Put the pointer on a period to see its times.
+- Before school, between periods and after school, the widget says so and shows the next period.
+- On a day with no periods (for example, the weekend), the widget shows the next school day's timeline, faded.
+
+The widget uses a custom timetable. This is useful when the teaching timetable is different from the Compass period structure,
+for example in a primary school that marks AM/PM rolls. The custom timetable is for this widget only. It does not change the attendance.
+
+To set up the timetable:
+
+1. Click the gear button on the widget.
+2. Click **+ Add a period**, then type the name, the start and the finish. Tick **Break** for recess or lunch.
+3. **Mon–Fri** is the timetable for every school day. To make one day different, click the day, then click **Give … its own timetable**.
+4. Click **Save**. The browser keeps the timetable.
+
+The Compass period structure will be available as a source when the extension knows the Compass request for it.
 
 ### Relief
 
@@ -119,9 +140,9 @@ The Attendance, Unmarked Rolls, Arrivals & Departures and Recent Chronicle widge
 
 Each widget keeps its own selection. A change in one widget does not change the other widgets.
 
-### Custom groups (Attendance and Arrivals & Departures)
+### Custom groups (Attendance, Arrivals & Departures and Recent Chronicle)
 
-The Attendance and Arrivals & Departures widgets can also filter by the student Custom Groups in Compass (People > Custom Groups):
+The Attendance, Arrivals & Departures and Recent Chronicle widgets can also filter by the student Custom Groups in Compass (People > Custom Groups):
 
 1. Click the chip below the widget title.
 2. Click **Custom groups**, then select one or more groups. The widget shows the students who are in at least one of the groups. If there are many groups, type in the search box to find a group.
@@ -183,13 +204,28 @@ To show the date box again, change `false` to `true`.
 
 Do not only delete the lines that have the comment `DEBUG`. Other lines use the date box too, and the widget stops working without them.
 
+## Show test names
+
+For demonstrations and screenshots, the widgets can show Final Fantasy VII names instead of the real names of students, staff and Custom Groups.
+Only the names on the screen change. The widgets still use the real data.
+
+1. Open `src/shared/names.js`.
+2. Change `const TEST_NAMES = false;` to `true`.
+3. Reload the extension on the `chrome://extensions` page.
+4. On the Compass homepage, hold Alt (Option on a Mac) and click the title of an extension widget. A red **Test names** chip shows on each widget.
+5. To show the real names again, Alt+click a title again.
+
+Set `TEST_NAMES` back to `false` before you release the extension.
+
 ## Files
 
 | Folder or file | Purpose |
 | --- | --- |
 | `manifest.json` | The extension settings and the list of scripts, in load order. |
 | `src/shared/years.js` | The year-group order, the year-group labels and the filter chip. All widgets use this file. The Recent Chronicle widget also uses the filter chip for entry types. |
-| `src/shared/groups.js` | The Compass Custom Groups for the Attendance and Arrivals & Departures filters. |
+| `src/shared/groups.js` | The Compass Custom Groups for the Attendance, Arrivals & Departures and Recent Chronicle filters. |
+| `src/shared/names.js` | The test names (Final Fantasy VII names instead of real names). |
+| `src/shared/periods.js` | The periods of a school day (custom timetable) for the Current Period widget. |
 | `src/shared/theme.js` | The base look (`CompassTheme.CSS`) and the icons (`CompassTheme.ICONS`) for all widgets. |
 | `src/widgets/attendance/data.js` | Gets the attendance data from Compass and counts it. Contains the list of attendance codes. |
 | `src/widgets/attendance/chart.js` | The Attendance chart, for the homepage widget and the toolbar panel. |
@@ -197,6 +233,7 @@ Do not only delete the lines that have the comment `DEBUG`. Other lines use the 
 | `src/widgets/movements.js` | The Arrivals & Departures widget. |
 | `src/widgets/chronicle.js` | The Recent Chronicle widget. |
 | `src/widgets/relief.js` | The Relief widget. |
+| `src/widgets/period.js` | The Current Period widget. |
 | `src/widgets/weather.js` | The Weather widget. `src/toolbar/background.js` gets the BOM files for it. |
 | `src/homepage/welcome.js` | The welcome card that shows after a new install. |
 | `src/homepage/homepage.js` | Adds the widgets to the Compass homepage and to the layout editor. Moves and hides the widgets. Shows the welcome card while no widget is on the homepage. |

@@ -192,6 +192,8 @@ globalThis.CompassMovementsUI = (() => {
         <div class="foot" id="foot"></div>
       </div>`;
     const $ = (id) => root.getElementById(id);
+    const N = globalThis.CompassNames;
+    N.attach(root);
     const footText = () => `Refreshes every ${REFRESH_MINUTES} min`;
     const setFoot = (text) => { $("foot").textContent = $("foot").title = text; }; // One line. The full text shows on hover.
 
@@ -329,6 +331,7 @@ globalThis.CompassMovementsUI = (() => {
         if (!users) { skeleton(); return; } // render() runs again when the members arrive
       }
       const res = summarise(lastData.items, lastData.yearNames, lastData.now, Array.isArray(years) ? years : null, users);
+      if (N.on()) res.rows = res.rows.map((r) => ({ ...r, name: N.person(r.name), by: N.person(r.by) })); // test names
       const now = new Date();
       const rows = view === "all" ? res.rows : res.rows.filter((r) => r.type === view);
       const what = view === "arrival" ? "late arrival" : view === "departure" ? "early departure" : "arrival or departure";
@@ -382,6 +385,7 @@ globalThis.CompassMovementsUI = (() => {
 
     $("refresh").onclick = () => refresh();
     refresh();
+    const offNames = N.onChange(() => { showYears(); if (lastData && !busy) render(); });
 
     // Automatic refresh. Browsers slow the timers in background tabs, thus the widget also
     // refreshes when the user opens the tab again.
@@ -389,7 +393,7 @@ globalThis.CompassMovementsUI = (() => {
     const onVisible = () => { if (document.visibilityState === "visible" && due()) refresh({ quiet: true }); };
     const timer = setInterval(onVisible, 30 * 1000);
     document.addEventListener("visibilitychange", onVisible);
-    return { refresh, stop: () => { clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); } };
+    return { refresh, stop: () => { clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); offNames(); } };
   }
 
   return { mount };

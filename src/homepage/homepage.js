@@ -67,6 +67,13 @@
       after: "compass-relief-widget",
       mount: (host, preview) => globalThis.CompassWeatherUI.mount(host, { preview }),
     },
+    {
+      id: "compass-period-widget",
+      title: "Current period (extension)",
+      posKey: "periodWidgetPosition",
+      after: "compass-weather-widget",
+      mount: (host, preview) => globalThis.CompassPeriodUI.mount(host, { preview }),
+    },
   ].map((c) => ({ ...c, el: null, api: null, positions: {} }));
 
   const HIDDEN_KEY = "hiddenWidgets"; // ids of cards removed from the homepage

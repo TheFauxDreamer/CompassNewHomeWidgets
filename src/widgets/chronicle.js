@@ -48,12 +48,13 @@ globalThis.CompassChronicle = (() => {
   }
 
   // days: 1 = today, 7 = today and the 6 days before. years: year-level names (null = all).
-  // The year filter operates in Compass, thus a change to it sends a new request.
-  async function load({ days = 1, years = null, now = new Date() } = {}) {
+  // users: Compass user IDs to keep instead (the members of Custom Groups), or null.
+  // Both filters operate in Compass, thus a change to them sends a new request.
+  async function load({ days = 1, years = null, users = null, now = new Date() } = {}) {
     const yearNames = await fetchYearNames();
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
-    const ids = years ? [...yearNames].filter(([, n]) => years.includes(n)).map(([id]) => id) : [];
-    if (years && !ids.length) return { items: [], total: 0, capped: false, now, yearNames };
+    const ids = years && !users ? [...yearNames].filter(([, n]) => years.includes(n)).map(([id]) => id) : [];
+    if ((years && !users && !ids.length) || (users && !users.length)) return { items: [], total: 0, capped: false, now, yearNames };
 
     const items = [];
     let total = 0;
@@ -63,7 +64,8 @@ globalThis.CompassChronicle = (() => {
           createdByFilter: [], categoryFilter: [], templateFilter: [], ratingFilter: [], formGroupFilter: [],
           yearLevelFilter: ids, houseFilter: [], campusFilter: [], rollFlagFilter: [],
           pointsStart: null, pointsFinish: null, entryIdFilter: null, showAppendedEntries: false, importedFilter: 1,
-          entryCreatedStart: localStamp(start), entryCreatedFinish: localStamp(now), studentFilter: [], needsApprovalFilter: 3,
+          // studentFilter: the user IDs of the students, as the Chronicle page sends them for its student filter.
+          entryCreatedStart: localStamp(start), entryCreatedFinish: localStamp(now), studentFilter: users || [], needsApprovalFilter: 3,
         },
         page, start: (page - 1) * PAGE_SIZE, limit: PAGE_SIZE,
         sort: JSON.stringify([{ property: "createdTimestamp", direction: "DESC" }]),
@@ -380,6 +382,8 @@ globalThis.CompassChronicleUI = (() => {
     const { load, summarise, REFRESH_MINUTES, NEW_MINUTES } = globalThis.CompassChronicle;
     const { CSS, ICONS } = globalThis.CompassTheme;
     const Y = globalThis.CompassYears;
+    const G = globalThis.CompassGroups;
+    const N = globalThis.CompassNames;
     const root = host.shadowRoot || host.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>${CSS}${Y.CSS}${CSS_EXTRA}</style>
@@ -401,6 +405,7 @@ globalThis.CompassChronicleUI = (() => {
         <div class="foot" id="foot"></div>
       </div>`;
     const $ = (id) => root.getElementById(id);
+    N.attach(root);
     const footText = () => `Refreshes every ${REFRESH_MINUTES} min`;
     const setFoot = (text) => { $("foot").textContent = $("foot").title = text; }; // One line. The full text shows on hover.
 
@@ -409,13 +414,13 @@ globalThis.CompassChronicleUI = (() => {
     let again = false;   // A filter changed during a load. Load again after it.
     let lastData = null; // { items, total, capped, now, yearNames } from the last load
     const DAYS_KEY = "chronicleDays";        // 1 | 7
-    const YEARS_KEY = "chronicleYearGroups"; // array of year names; null = all
+    const YEARS_KEY = "chronicleYearGroups"; // array of year names; null = all; or a group selection (groups.js)
     const TYPES_KEY = "chronicleTypes";      // array of template names; null = all
     let days = 1, years = null, types = null;
     const save = (key, value) => { try { chrome.storage.local.set({ [key]: value }); } catch (_) {} };
 
-    // --- filters: year groups (the same filter as the other widgets) and entry types ---------
-    const yearFilter = Y.filter({ onChange: (next) => setYears(next, true), onOpen: () => typeFilter.close() });
+    // --- filters: year groups or Custom Groups (the same filter as the other widgets) and entry types ---------
+    const yearFilter = Y.filter({ onChange: (next) => setYears(next, true), onOpen: () => typeFilter.close(), groups: G });
     const typeFilter = Y.filter({
       onChange: (next) => setTypes(next, true), onOpen: () => yearFilter.close(),
       allText: "All types", noneText: "No types", noun: "Entry types", sortFn: byName, wide: true,
@@ -426,7 +431,7 @@ globalThis.CompassChronicleUI = (() => {
 
     function yearOptions() {
       const set = new Set([...(lastData?.yearNames?.values() || [])].filter(Boolean));
-      for (const y of years || []) set.add(y);
+      if (Array.isArray(years)) for (const y of years) set.add(y);
       return Y.sort(set);
     }
     // The types in the loaded entries, and the types that the user selected before.
@@ -441,7 +446,8 @@ globalThis.CompassChronicleUI = (() => {
     };
 
     function setYears(next, fromUser) {
-      years = next === null ? null : Y.sort(next);
+      next = G.validSelection(next);
+      years = Array.isArray(next) ? Y.sort(next) : next;
       if (fromUser) save(YEARS_KEY, years);
       showFilters();
       if (lastData || fromUser) refresh(); // Compass does the year filter, thus load again.
@@ -546,11 +552,13 @@ globalThis.CompassChronicleUI = (() => {
 
     function render() {
       const res = summarise(lastData.items, lastData.now, types);
+      if (N.on()) res.rows = res.rows.map((r) => ({ ...r, students: r.students.map(N.person), by: N.person(r.by) })); // test names
       const now = new Date();
       const n = res.rows.length;
       if (!n) {
         const others = res.otherTypes ? ` · ${res.otherTypes} of other types` : "";
-        message("0", "entries", `No Chronicle entries ${days === 1 ? "today" : "in the last 7 days"}${others}`);
+        const which = G.isGroups(years) ? ` for ${G.label(years)}` : "";
+        message("0", "entries", `No Chronicle entries ${days === 1 ? "today" : "in the last 7 days"}${which}${others}`);
       } else {
         setSummary(String(n), n === 1 ? "entry" : "entries", rangeText());
       }
@@ -566,7 +574,9 @@ globalThis.CompassChronicleUI = (() => {
       if (!quiet || !lastData) skeleton();
       if (!lastLoaded) setFoot(footText());
       try {
-        lastData = await load({ days, years });
+        // For Custom Groups, Compass filters by the students' user IDs (cached for a few minutes, groups.js).
+        const users = G.isGroups(years) ? [...await G.members(years.ids)] : null;
+        lastData = await load({ days, years: Array.isArray(years) ? years : null, users });
         render();
         showFilters(); // The lists of year groups and types can change after a load.
       } catch (e) {
@@ -597,7 +607,7 @@ globalThis.CompassChronicleUI = (() => {
     try {
       chrome.storage.local.get([DAYS_KEY, YEARS_KEY, TYPES_KEY], (r) => {
         days = Number(r?.[DAYS_KEY]) === 7 ? 7 : 1;
-        years = Array.isArray(r?.[YEARS_KEY]) ? r[YEARS_KEY] : null;
+        years = G.validSelection(r?.[YEARS_KEY] ?? null);
         types = Array.isArray(r?.[TYPES_KEY]) ? r[TYPES_KEY] : null;
         showDays();
         showFilters();
@@ -615,6 +625,7 @@ globalThis.CompassChronicleUI = (() => {
     } catch (_) { start(); }
 
     $("refresh").onclick = () => refresh();
+    const offNames = N.onChange(() => { showFilters(); if (lastData && !busy) render(); });
 
     // Automatic refresh. Browsers slow the timers in background tabs, thus the widget also
     // refreshes when the user opens the tab again.
@@ -622,7 +633,7 @@ globalThis.CompassChronicleUI = (() => {
     const onVisible = () => { if (started && document.visibilityState === "visible" && due()) refresh({ quiet: true }); };
     const timer = setInterval(onVisible, 30 * 1000);
     document.addEventListener("visibilitychange", onVisible);
-    return { refresh, stop: () => { clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); } };
+    return { refresh, stop: () => { clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); offNames(); } };
   }
 
   return { mount };

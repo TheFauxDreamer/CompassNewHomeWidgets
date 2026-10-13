@@ -1,6 +1,6 @@
 // Compass Custom Groups (People > Custom Groups) for the student filters.
-// The Attendance chart and Arrivals & Departures can filter by these groups instead of
-// by year group. A group is a set of Compass user IDs, so a widget keeps a student when
+// The Attendance chart, Arrivals & Departures and Recent Chronicle can filter by these
+// groups instead of by year group. A group is a set of Compass user IDs, so a widget keeps a student when
 // the student's ID is in at least one of the selected groups.
 //
 // A group selection is saved as { kind: "groups", ids: ["<id>", …], names: { "<id>": "<name>" } }.
@@ -93,7 +93,9 @@ globalThis.CompassGroups = (() => {
     return null;
   }
 
-  const label = (sel) => sel.ids.map((id) => sel.names?.[id] || "Unknown group").join(", ");
+  // The name to show for a group: its test name while the test names are on (names.js).
+  const display = (name) => globalThis.CompassNames?.group(name) ?? name;
+  const label = (sel) => sel.ids.map((id) => display(sel.names?.[id]) || "Unknown group").join(", ");
 
   // Keeps the members of a widget's selected groups. get(sel) gives the Set, or null
   // while it loads (then onReady() runs), or throws the error from Compass.
@@ -114,5 +116,5 @@ globalThis.CompassGroups = (() => {
     };
   }
 
-  return { available: AVAILABLE, list, members, isGroups, validSelection, label, tracker };
+  return { available: AVAILABLE, list, members, isGroups, validSelection, label, display, tracker };
 })();

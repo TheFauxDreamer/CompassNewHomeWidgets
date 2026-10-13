@@ -105,7 +105,7 @@ globalThis.CompassUnmarked = (() => {
       if (!byTeacher.has(key)) byTeacher.set(key, { code: r.teacher.code, name: r.teacher.name, rolls: [], covering: new Map() });
       const t = byTeacher.get(key);
       t.rolls.push(r);
-      for (const c of r.teacher.covering) t.covering.set(c.code || c.name, c.name);
+      for (const c of r.teacher.covering) t.covering.set(c.code || c.name, c);
     }
     const teachers = [...byTeacher.values()].map((t) => ({ ...t, covering: [...t.covering.values()] }));
     teachers.forEach((t) => t.rolls.sort((a, b) => a.start - b.start));
@@ -234,6 +234,8 @@ globalThis.CompassUnmarkedUI = (() => {
         <div class="foot" id="foot"></div>
       </div>`;
     const $ = (id) => root.getElementById(id);
+    const N = globalThis.CompassNames;
+    N.attach(root);
     const footText = () => `Refreshes every ${REFRESH_MINUTES} min · rolls show ${GRACE_MINUTES} min after they start`;
     const setFoot = (text) => { $("foot").textContent = $("foot").title = text; }; // one line; full text on hover
 
@@ -351,7 +353,7 @@ globalThis.CompassUnmarkedUI = (() => {
           const name = el("div", "name", t.name);
           if (t.code) name.title = t.code;
           who.append(name);
-          if (t.covering.length) who.append(el("div", "cover", `Relief for ${t.covering.join(", ")}`));
+          if (t.covering.length) who.append(el("div", "cover", `Relief for ${t.covering.map((c) => c.name).join(", ")}`));
 
           const chips = el("div", "chips");
           for (const r of t.rolls) {
@@ -446,8 +448,15 @@ globalThis.CompassUnmarkedUI = (() => {
       }
     }
 
+    // Test names (names.js): the teachers' names and codes on the screen.
+    function disguise(res) {
+      if (!N.on()) return res;
+      const teacher = (t) => ({ ...N.staff(t), covering: t.covering.map(N.staff) });
+      return { ...res, teachers: res.teachers.map((t) => ({ ...teacher(t), rolls: t.rolls.map((r) => ({ ...r, teacher: teacher(r.teacher) })) })) };
+    }
+
     function render() {
-      const res = summarise(lastData.items, lastData.now, GRACE_MINUTES, years);
+      const res = disguise(summarise(lastData.items, lastData.now, GRACE_MINUTES, years));
       const now = new Date();
       if (!res.total) {
         const which = years === null ? "All rolls" : `All ${years.length ? yearsLabel(years) : "selected"} rolls`;
@@ -489,6 +498,7 @@ globalThis.CompassUnmarkedUI = (() => {
 
     $("refresh").onclick = refresh;
     refresh();
+    const offNames = N.onChange(() => { if (lastData && !busy) render(); });
 
     // Auto-refresh. Browsers slow timers in background tabs, so also catch up
     // as soon as the tab is looked at again.
@@ -496,7 +506,7 @@ globalThis.CompassUnmarkedUI = (() => {
     const onVisible = () => { if (document.visibilityState === "visible" && due()) refresh(); };
     const timer = setInterval(onVisible, 30 * 1000);
     document.addEventListener("visibilitychange", onVisible);
-    return { refresh, stop: () => { clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); } };
+    return { refresh, stop: () => { clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); offNames(); } };
   }
 
   return { mount };

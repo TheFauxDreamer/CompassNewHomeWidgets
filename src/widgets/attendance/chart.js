@@ -52,6 +52,7 @@ globalThis.CompassAttendanceUI = (() => {
 
     const $ = (id) => root.getElementById(id);
     const body = $("body");
+    globalThis.CompassNames.attach(root);
     if (onClose) $("close").onclick = onClose;
     if (!preview) $("refresh").onclick = () => refresh();
 
@@ -142,6 +143,7 @@ globalThis.CompassAttendanceUI = (() => {
     $("yarea").append(yearFilter.panel);
     const showYears = () => yearFilter.set(allYears, data && Array.isArray(selected) ? currentSelection() : selected);
     const groupMembers = G.tracker(() => { if (data) renderChart(); });
+    const offNames = globalThis.CompassNames.onChange(() => { showYears(); redraw(); }); // group names in the chip
 
     function setSelection(next) {
       selected = next;
@@ -394,7 +396,7 @@ globalThis.CompassAttendanceUI = (() => {
     // as soon as the tab is looked at again.
     const due = () => Date.now() - lastLoaded >= REFRESH_MINUTES * 60 * 1000;
     const onVisible = () => { if (document.visibilityState === "visible" && due()) refresh({ quiet: true }); };
-    const stop = () => { clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
+    const stop = () => { clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); offNames(); };
     const timer = setInterval(() => (host.isConnected ? onVisible() : stop()), 30 * 1000);
     document.addEventListener("visibilitychange", onVisible);
     return { refresh, stop };

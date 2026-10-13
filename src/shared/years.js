@@ -137,12 +137,12 @@ globalThis.CompassYears = (() => {
       // Selected groups that Compass no longer lists, so they can be unticked.
       const gone = groupList ? chosen.ids.filter((id) => !groupList.some((g) => g.id === id)) : [];
       for (const id of gone) {
-        const b = box(`${chosen.names[id] || "Unknown group"} (not in Compass now)`, true, (on) => toggleGroup({ id, name: chosen.names[id] }, on), "ygone");
+        const b = box(`${G.display(chosen.names[id]) || "Unknown group"} (not in Compass now)`, true, (on) => toggleGroup({ id, name: chosen.names[id] }, on), "ygone");
         list.append(b);
       }
-      const shown = (groupList || []).filter((g) => !q || g.name.toLowerCase().includes(q) || g.type.toLowerCase().includes(q));
+      const shown = (groupList || []).filter((g) => !q || G.display(g.name).toLowerCase().includes(q) || g.type.toLowerCase().includes(q));
       for (const g of shown) {
-        const b = box(g.name, chosen.ids.includes(g.id), (on) => toggleGroup(g, on));
+        const b = box(G.display(g.name), chosen.ids.includes(g.id), (on) => toggleGroup(g, on));
         if (g.type) b.append(el("span", "ytype", g.type));
         list.append(b);
       }
