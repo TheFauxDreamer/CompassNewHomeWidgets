@@ -23,6 +23,24 @@ The widget selects the session automatically:
 - On a school day, the widget shows the AM roll. When more than 100 students have a PM code, the widget shows the PM roll.
 - On other days, the widget shows the most recent session that has marked students.
 
+For today's session, the widget also checks the unmarked rolls that have started. The students in those rolls count as **Not marked**, even when the Compass half-day grid already shows a code for them.
+The widget opens each unmarked roll to find its students, so a day with many unmarked rolls takes a little longer to load.
+
+#### Count by period (optional)
+
+Compass has attendance by period only class by class. To count the current period from every class roll:
+
+1. Click the **(i)** button on the Attendance widget.
+2. Under **Count attendance**, select **By period, from each class roll**.
+
+The chart then follows the period structure: it shows the period that is on now, or the last period that finished today, for example "Period 3 · 42 class rolls · 610 students". The date and the time of the last update show at the bottom of the chart.
+Before the first period, and on days with no school, the chart shows the AM or PM roll and says why.
+Students who are not in a class in that period are not counted.
+
+This setting opens every class roll on each refresh (one request for each class), so it loads more slowly, especially in a large school.
+It uses the class list from Schedule Builder and the period structure from Compass. If your Compass account can't see these, the chart shows the AM or PM roll.
+To go back, select **By the AM or PM roll**.
+
 ### Unmarked Rolls
 
 This widget shows today's rolls that are not marked.

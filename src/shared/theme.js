@@ -29,9 +29,8 @@ globalThis.CompassTheme = (() => {
     .sub { color: #5f6368; margin-bottom: 10px; }
     .subrow { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
     .subrow .sub { margin: 0; flex: 1; min-width: 0; }
-    /* Two fixed lines (session, then counts) in every state, so the card never changes height. */
+    /* One fixed line (session and counts) in every state, so the card never changes height. */
     .sub .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .sub.err { height: 2.8em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
     .status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .seg { display: inline-flex; border: 1px solid #dadce0; border-radius: 6px; overflow: hidden; flex: none; }
     .seg button { border-radius: 0; background: #fff; padding: 2px 8px; font-size: 12px; }
@@ -39,12 +38,14 @@ globalThis.CompassTheme = (() => {
     .seg button[aria-pressed="true"] { background: #203249; color: #fff; }
     .chart { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 20px; }
     svg { display: block; flex: none; }
-    ul { list-style: none; margin: 0; padding: 0; flex: 1 1 200px; min-width: 200px; max-height: 170px; overflow-y: auto; }
-    li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+    /* Legend: one line for each row (long names end in …, the full name shows on hover), and a
+       height of exactly 7 rows, so a scrolled list never shows half a row. */
+    ul { list-style: none; margin: 0; padding: 0; flex: 1 1 200px; min-width: 200px; max-height: 168px; overflow-y: auto; }
+    li { display: flex; align-items: center; gap: 8px; height: 24px; }
     .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
-    .lbl { flex: 1; }
-    .pct { font-weight: 600; min-width: 48px; text-align: right; }
-    .n { color: #5f6368; min-width: 34px; text-align: right; }
+    .lbl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pct { font-weight: 600; min-width: 44px; text-align: right; white-space: nowrap; }
+    .n { color: #5f6368; min-width: 28px; text-align: right; white-space: nowrap; }
     .note { color: #5f6368; font-size: 12px; margin-top: 8px; }
     .err { color: #b3261e; }
     #info[aria-expanded="true"] { background: rgba(14, 108, 217, .12); color: #0E6CD9; }

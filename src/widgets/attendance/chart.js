@@ -28,12 +28,21 @@ globalThis.CompassAttendanceUI = (() => {
   // Chart-only rule; the base look comes from CompassTheme.CSS (src/shared/theme.js).
   const CHART_CSS = `
     .sw.hatch { background-image: ${HATCH_CSS}; }
+    /* Loading: a ring turns around the grey circle; the count shows in the middle. */
+    .spin { transform-box: fill-box; transform-origin: center; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
+    .spin-count { font: 600 20px Cabin, Roboto, system-ui, sans-serif; fill: #203249; }
+    .spin-label { font: 11px Cabin, Roboto, system-ui, sans-serif; fill: #5f6368; }
+    .infopanel label.mode { display: flex; gap: 6px; align-items: flex-start; margin: 4px 0; font-size: 12px; cursor: pointer; }
+    .infopanel label.mode input { margin: 2px 0 0; flex: none; }
+    .infopanel label.mode ~ .intro { margin-top: 12px; }
   `;
 
   const { CSS, ICONS } = globalThis.CompassTheme;
 
   function mountSnapshot(host, { mode = "panel", onClose, preview = false } = {}) {
-    const { load, tally, yearLevels, filterByYears, filterByUsers, CATEGORIES } = globalThis.CompassAttendance;
+    const { load, tally, yearLevels, filterByYears, filterByUsers, CATEGORIES, SESSION_KEY } = globalThis.CompassAttendance;
     const G = globalThis.CompassGroups;
     const root = host.shadowRoot || host.attachShadow({ mode: "open" });
     root.innerHTML = `
@@ -61,7 +70,26 @@ globalThis.CompassAttendanceUI = (() => {
     function buildInfo() {
       const { STATUSES } = globalThis.CompassAttendance;
       const groups = [...CATEGORIES, { key: "excluded", label: "Not counted (not expected at school)", color: "#fff" }];
-      infoPanel.innerHTML = '<p class="intro">Compass codes in each group of the chart:</p>';
+      infoPanel.textContent = "";
+      // Opt-in: count by period, from every class roll. First, so it is easy to find.
+      const modeHead = document.createElement("h2");
+      modeHead.textContent = "Count attendance";
+      infoPanel.append(modeHead);
+      for (const [m, text] of [
+        ["halfday", "By the AM or PM roll (the default)"],
+        ["period", "By period, from each class roll. The chart follows the current period. It opens every class roll, so it loads more slowly."],
+      ]) {
+        const label = document.createElement("label");
+        label.className = "mode";
+        const radio = Object.assign(document.createElement("input"), { type: "radio", name: "mode", checked: sessionMode === m });
+        radio.onchange = () => setMode(m, true);
+        label.append(radio, document.createTextNode(" " + text));
+        infoPanel.append(label);
+      }
+      const intro = document.createElement("p");
+      intro.className = "intro";
+      intro.textContent = "Compass codes in each group of the chart:";
+      infoPanel.append(intro);
       for (const g of groups) {
         const seen = new Set();
         const rows = STATUSES.filter(([, code, name, group]) => {
@@ -98,7 +126,8 @@ globalThis.CompassAttendanceUI = (() => {
       infoBtn.title = open ? "Back to the chart" : "What's in each group?";
     };
 
-    let data = null;       // { date, half, students } from Compass
+    let data = null;       // { date, half, students } from Compass; half "period" also has periodName and rolls
+    let sessionMode = "halfday";  // "halfday" | "period" (SESSION_KEY)
     let allYears = [];
     let selected = null;   // array of year names; null = all year groups; or a group selection (groups.js)
     let view = "groups";   // "groups" | "codes"
@@ -120,6 +149,9 @@ globalThis.CompassAttendanceUI = (() => {
     try {
       const onChanged = (changes, area) => {
         if (!host.isConnected) { chrome.storage.onChanged.removeListener(onChanged); return; }
+        if (area === "local" && SESSION_KEY in changes && (changes[SESSION_KEY].newValue || "halfday") !== sessionMode) {
+          setMode(changes[SESSION_KEY].newValue || "halfday", false);
+        }
         if (area === "local" && VIEW_KEY in changes) {
           const v = changes[VIEW_KEY].newValue || "groups";
           if (v !== view) { view = v; redraw(); }
@@ -153,7 +185,8 @@ globalThis.CompassAttendanceUI = (() => {
     }
 
     // --- chart ----------------------------------------------------------------
-    function pieSvg(slices, total, size = 170) {
+    // spinning: the loading look, with the progress count in the middle (see showProgress).
+    function pieSvg(slices, total, size = 170, spinning = false) {
       const r = size / 2, cx = r, cy = r;
       const ns = "http://www.w3.org/2000/svg";
       const svg = document.createElementNS(ns, "svg");
@@ -168,6 +201,25 @@ globalThis.CompassAttendanceUI = (() => {
         c.setAttribute("stroke", "#dadce0");
         c.setAttribute("stroke-width", "1.5");
         svg.appendChild(c);
+        if (spinning) {
+          const ring = document.createElementNS(ns, "circle");
+          const rr = r - 8;
+          ring.setAttribute("cx", cx); ring.setAttribute("cy", cy); ring.setAttribute("r", rr);
+          ring.setAttribute("fill", "none");
+          ring.setAttribute("stroke", "#0E6CD9");
+          ring.setAttribute("stroke-width", "6");
+          ring.setAttribute("stroke-linecap", "round");
+          ring.setAttribute("stroke-dasharray", `${(2 * Math.PI * rr) / 4} ${2 * Math.PI * rr}`);
+          ring.setAttribute("class", "spin");
+          svg.appendChild(ring);
+          for (const [cls, y] of [["spin-count", cy + 2], ["spin-label", cy + 20]]) {
+            const t = document.createElementNS(ns, "text");
+            t.setAttribute("class", cls);
+            t.setAttribute("x", cx); t.setAttribute("y", y);
+            t.setAttribute("text-anchor", "middle");
+            svg.appendChild(t);
+          }
+        }
         return svg;
       }
       if (nonZero.some((s) => s.hatch)) {
@@ -207,10 +259,20 @@ globalThis.CompassAttendanceUI = (() => {
       return svg;
     }
 
+    function setMode(m, save) {
+      sessionMode = m === "period" ? "period" : "halfday";
+      if (save) { try { chrome.storage.local.set({ [SESSION_KEY]: sessionMode }); } catch (_) {} }
+      if (!preview) refresh();
+    }
+
+    // The session, without the date (the date is in the status line at the bottom).
     function sessionLabel(date, half) {
+      if (half === "period") return `${data.periodName} · ${data.rolls} class roll${data.rolls === 1 ? "" : "s"}`;
+      return `${half.toUpperCase()} roll`;
+    }
+    function dayLabel(date) {
       const [y, m, d] = date.split("/").map(Number);
-      const day = new Date(y, m - 1, d).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
-      return `${day} · ${half.toUpperCase()} roll`;
+      return new Date(y, m - 1, d).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
     }
 
     // Draws the header line, pie and legend. Used for real data AND for the
@@ -253,21 +315,20 @@ globalThis.CompassAttendanceUI = (() => {
 
     // Draws the header line, pie and legend. Used for real data AND for the
     // loading/error placeholder, so the card is the same size in every state.
-    // lines: [session, counts] (an error is one message clamped to the same two lines).
-    function drawChart(lines, res, { isError = false } = {}) {
+    // lines: [session, counts], shown as one line ("PM roll · 475 students"). The full text
+    // shows on hover. An error is one message on the same line.
+    function drawChart(lines, res, { isError = false, spinning = false } = {}) {
       body.textContent = "";
       const row = document.createElement("div");
       row.className = "subrow";
       const sub = document.createElement("div");
       sub.className = isError ? "sub err" : "sub";
-      if (isError) sub.textContent = sub.title = lines.join(" ");
-      else for (const text of lines) {
-        const line = document.createElement("div");
-        line.className = "line";
-        line.textContent = text || "\u00a0";
-        line.title = text;
-        sub.appendChild(line);
-      }
+      const text = lines.filter(Boolean).join(isError ? " " : " · ");
+      const line = document.createElement("div");
+      line.className = "line";
+      line.textContent = text || "\u00a0";
+      line.title = text;
+      sub.appendChild(line);
       row.append(sub, viewToggle());
       body.appendChild(row);
 
@@ -275,7 +336,7 @@ globalThis.CompassAttendanceUI = (() => {
       const slices = buildSlices(res);
       const chart = document.createElement("div");
       chart.className = "chart";
-      chart.appendChild(pieSvg(slices, total)); // grey circle when there's nothing to show
+      chart.appendChild(pieSvg(slices, total, 170, spinning)); // grey circle when there's nothing to show
 
       const ul = document.createElement("ul");
       for (const s of slices) {
@@ -301,21 +362,38 @@ globalThis.CompassAttendanceUI = (() => {
         status.textContent = `Couldn't refresh · trying again in ${REFRESH_MINUTES} min`;
         status.title = refreshError;
       } else {
-        status.textContent = lastUpdated && res
-          ? `Updated ${fmtTime(lastUpdated)} · refreshes every ${REFRESH_MINUTES} min`
+        status.textContent = lastUpdated && res && data
+          ? `${dayLabel(data.date)} · updated ${fmtTime(lastUpdated)} · refreshes every ${REFRESH_MINUTES} min`
           : `Refreshes every ${REFRESH_MINUTES} min`;
+        status.title = status.textContent;
       }
       body.appendChild(status);
+      if (spinning) showProgress(progress);
     }
 
     function redraw() {
       if (data) renderChart();
-      else if (lastSkeleton) drawChart([lastSkeleton[0], ""], null, { isError: lastSkeleton[1] });
+      else if (lastSkeleton) drawChart([lastSkeleton[0], ""], null, { isError: lastSkeleton[1], spinning: lastSkeleton[2] });
     }
 
-    function renderSkeleton(message, isError = false) {
-      lastSkeleton = [message, isError];
-      drawChart([message, ""], null, { isError });
+    function renderSkeleton(message, isError = false, spinning = false) {
+      lastSkeleton = [message, isError, spinning];
+      drawChart([message, ""], null, { isError, spinning });
+    }
+
+    // The count while class rolls load: in the middle of the turning ring, or (when the old
+    // chart stays on screen during an automatic refresh) in the status line.
+    let progress = null; // { done, total, label } or null
+    function showProgress(p) {
+      progress = p;
+      const count = root.querySelector(".spin-count"), label = root.querySelector(".spin-label");
+      if (count) {
+        count.textContent = p ? `${p.done} / ${p.total}` : "";
+        label.textContent = p ? p.label : "";
+        return;
+      }
+      const status = root.querySelector(".status");
+      if (status && p && busy) status.textContent = `Checking ${p.label.replace(" checked", "")}… ${p.done} / ${p.total}`;
     }
 
     function renderChart() {
@@ -332,18 +410,19 @@ globalThis.CompassAttendanceUI = (() => {
       }
 
       const none = !students;
-      const res = tally(none ? [] : students, data.date, data.half);
+      const res = tally(none ? [] : students, data.date, data.half, data.notMarked);
       const notCounted = none ? 0 : res.counts.excluded;
       drawChart([
         sessionLabel(data.date, data.half),
         none ? "No year groups selected" : `${res.total} students` + (notCounted ? ` (+${notCounted} not counted)` : ""),
       ], res);
       if (notCounted) {
-        root.querySelector(".subrow .sub .line:last-child").title =
-          `${notCounted} student(s) weren't expected at school (not required to attend, school closure or unscheduled), so they're left out of the chart. See (i) for the codes.`;
+        const line = root.querySelector(".subrow .sub .line");
+        line.title += `\n${notCounted} student(s) weren't expected at school (not required to attend, school closure or unscheduled), so they're left out of the chart. See (i) for the codes.`;
       }
 
       const notes = [];
+      if (sessionMode === "period" && data.periodError) notes.push([`By period isn't available now, so the chart shows the ${data.half.toUpperCase()} roll: ${data.periodError}`]);
       if (res.unknownCodes.length) {
         notes.push(["Unmapped codes, left out: " + res.unknownCodes.map(([k, n]) => `${k} ×${n}`).join(", ") + ". Add them to src/widgets/attendance/data.js."]);
       }
@@ -356,12 +435,18 @@ globalThis.CompassAttendanceUI = (() => {
     }
 
     // quiet: keep the current chart on screen while reloading (auto-refresh).
+    let again = false; // the setting changed during a load: load again after it
     async function refresh({ quiet = false } = {}) {
-      if (busy) return;
+      if (busy) { if (!quiet) again = true; return; }
       busy = true;
-      if (!quiet || !data) renderSkeleton("Loading…");
+      progress = null;
+      if (!quiet || !data) renderSkeleton("Loading…", false, true);
       try {
-        const [result, saved] = await Promise.all([load(), loadSaved()]);
+        const savedMode = await new Promise((res) => {
+          try { chrome.storage.local.get(SESSION_KEY, (r) => res(r?.[SESSION_KEY])); } catch (_) { res(null); }
+        });
+        sessionMode = savedMode === "period" ? "period" : "halfday";
+        const [result, saved] = await Promise.all([load(new Date(), { mode: sessionMode, onProgress: showProgress }), loadSaved()]);
         if (!result) { data = null; renderSkeleton("No marked roll sessions found for this week or last week."); return; }
         data = result;
         lastUpdated = new Date();
@@ -377,6 +462,7 @@ globalThis.CompassAttendanceUI = (() => {
       } finally {
         lastLoaded = Date.now();
         busy = false;
+        if (again) { again = false; refresh(); }
       }
     }
 
