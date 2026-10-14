@@ -33,10 +33,17 @@
       mount: (host, preview) => globalThis.CompassAttendanceUI.mountSnapshot(host, { mode: "widget", preview }),
     },
     {
+      id: "compass-day-attendance-widget",
+      title: "Attendance today (extension)",
+      posKey: "dayAttendanceWidgetPosition",
+      after: "compass-attendance-widget",
+      mount: (host, preview) => globalThis.CompassDayAttendanceUI.mount(host, { preview }),
+    },
+    {
       id: "compass-unmarked-widget",
       title: "Unmarked rolls (extension)",
       posKey: "unmarkedWidgetPosition",
-      after: "compass-attendance-widget",
+      after: "compass-day-attendance-widget",
       mount: (host, preview) => globalThis.CompassUnmarkedUI.mount(host, { preview }),
     },
     {
@@ -79,6 +86,8 @@
   const HIDDEN_KEY = "hiddenWidgets"; // ids of cards removed from the homepage
   const NEW_INSTALL_KEY = "newInstall"; // set by background.js on a new install
   const WELCOME_KEY = "welcomeDismissed";
+  const EDITOR_NOTE_KEY = "editorNoteDismissed"; // the notice about dragging, in the layout editor
+  let editorNoteDismissed = false;
   let hidden = new Set();
   let welcomeDismissed = false;
 
@@ -100,7 +109,8 @@
   // drops them, as it does for Compass's widgets.
   let dirty = false;
   try {
-    chrome.storage.local.get([...CARDS.map((c) => c.posKey), HIDDEN_KEY, NEW_INSTALL_KEY, WELCOME_KEY], (r) => {
+    chrome.storage.local.get([...CARDS.map((c) => c.posKey), HIDDEN_KEY, NEW_INSTALL_KEY, WELCOME_KEY, EDITOR_NOTE_KEY], (r) => {
+      editorNoteDismissed = !!r?.[EDITOR_NOTE_KEY];
       for (const c of CARDS) c.positions = r?.[c.posKey] || {};
       hidden = new Set(r?.[HIDDEN_KEY] || []);
       welcomeDismissed = !!r?.[WELCOME_KEY];
@@ -186,6 +196,106 @@
     }, true);
   }
 
+  // --- dragging a Compass widget (editor only) -----------------------------------------
+  // Compass picks the drop place from the Compass widget under the pointer. Our cards are not
+  // Compass widgets, so with the pointer over one, Compass sees only the column and puts the
+  // widget at the END of the column. So while a Compass widget is dragged, our cards fold to
+  // nothing (a thin outline shows where they are, and they give back their gap too): the
+  // column is then laid out as if they weren't there, and the widget lands where it's pointed.
+  // Compass's own widgets are never changed (that upsets Compass's drag measurements).
+  //
+  // After the drop, React (Compass's page library) moves the widget next to the Compass
+  // widget that now follows it, or to the END of the column box when none follows: then it
+  // lands after our cards at the bottom. So at pointerdown each card remembers the Compass
+  // widget below it (its anchor), and after the drop it goes back above that widget (or to
+  // the end of its column). A card never follows the dragged widget.
+  // Compass starts the drag on pointerdown, so this runs first (capture on the document).
+  const DEBUG_DRAG = false; // true: log the column order at each step of a Compass drag
+  let compassDrag = null;   // { item, anchors, key, releasing } while a Compass widget is held
+  const columnOrder = (columns) => columns.map((col, i) => ({
+    column: i + 1,
+    order: [...col.children].map((k) => (isOurs(k) ? `[${k.id.replace(/^compass-|-widget$/g, "")}]` : k.id.replace("sortable-", ""))).join(" · "),
+  }));
+  if (EDITING) {
+    const style = document.createElement("style");
+    style.textContent = `
+      [data-ext-card="1"][data-ext-folded] { height: 0 !important; min-height: 0 !important; overflow: visible !important;
+        margin-block: calc(var(--ext-gap, 20px) / -2) !important; border-radius: 3px;
+        box-shadow: 0 0 0 2px rgba(14, 108, 217, .5); }
+      [data-ext-card="1"][data-ext-folded] > * { visibility: hidden; height: 0 !important; overflow: hidden !important; }`;
+    document.head.append(style);
+
+    document.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || compassDrag) return;
+      const handle = e.target.closest?.('[aria-roledescription="sortable"]');
+      const item = handle?.closest('[id^="sortable-"]');
+      if (!item || isOurs(item.closest("[data-ext-card]"))) return;
+      const column = item.parentElement;
+      const gap = parseFloat(column && getComputedStyle(column).rowGap) || 0;
+      document.documentElement.style.setProperty("--ext-gap", `${gap}px`);
+      // Cards above the widget in its own column would move it away from the pointer when
+      // they fold (each gives up its height and one gap), so the widget gets that room back
+      // as a top margin.
+      let lost = 0;
+      for (const sib of column?.children || []) {
+        if (sib === item) break;
+        if (isOurs(sib)) lost += sib.getBoundingClientRect().height + gap;
+      }
+      // Each card's anchor: the next Compass widget below it, not counting the dragged one.
+      const layout = document.querySelector(LAYOUT_SELECTOR);
+      const columns = findEditorColumns(layout || document.body)?.columns || [];
+      const anchors = [];
+      columns.forEach((col, ci) => {
+        const kids = [...col.children];
+        kids.forEach((k, i) => {
+          if (!isOurs(k)) return;
+          const before = kids.slice(i + 1).find((n) => !isOurs(n) && n !== item && n.id?.startsWith("sortable-")) || null;
+          anchors.push({ el: k, column: ci, before });
+        });
+      });
+      if (DEBUG_DRAG) { console.log("[Ext drag] start"); console.table(columnOrder(columns)); }
+      for (const c of CARDS) c.el?.setAttribute("data-ext-folded", "");
+      if (lost > 0) item.style.marginTop = `${lost}px`;
+      compassDrag = { item, anchors, key: layoutKey(columns), releasing: false };
+    }, true);
+
+    const release = () => {
+      if (!compassDrag || compassDrag.releasing) return;
+      compassDrag.releasing = true;
+      const { item, anchors, key } = compassDrag;
+      const editorColumns = () => findEditorColumns(document.querySelector(LAYOUT_SELECTOR) || document.body)?.columns || [];
+      // Wait until Compass has moved its widget (or 500 ms, for a drop in the same place or
+      // a cancel), then put the cards back above their anchors and show them again.
+      const until = Date.now() + 500;
+      const wait = () => {
+        const columns = editorColumns();
+        if (layoutKey(columns) === key && Date.now() < until) { requestAnimationFrame(wait); return; }
+        if (DEBUG_DRAG) { console.log("[Ext drag] after Compass's drop"); console.table(columnOrder(columns)); }
+        for (const a of anchors) {
+          if (!a.el.isConnected) continue;
+          if (a.before?.isConnected) a.before.parentElement.insertBefore(a.el, a.before);
+          else {
+            const col = columns[Math.min(a.column, columns.length - 1)];
+            if (col) col.appendChild(a.el);
+          }
+        }
+        if (columns.length && layoutKey(columns) !== key) {
+          stagePositions(columns); // kept with Compass's Save, as for any move
+          compassLayout = layoutKey(columns); // so noteCompassChanges() doesn't record again
+        }
+        if (DEBUG_DRAG) { console.log("[Ext drag] cards restored"); console.table(columnOrder(columns)); }
+        item.style.marginTop = "";
+        for (const c of CARDS) c.el?.removeAttribute("data-ext-folded");
+        compassDrag = null;
+        schedule();
+      };
+      requestAnimationFrame(wait);
+    };
+    window.addEventListener("pointerup", release, true);
+    window.addEventListener("pointercancel", release, true);
+    window.addEventListener("blur", release);
+  }
+
   // Takes a card off the homepage and stops it refreshing in the background.
   function removeCard(def) {
     if (!def.el) return;
@@ -238,6 +348,50 @@
 
   // --- finding columns in the layout editor -------------------------------------
   // Editor widgets are <div id="sortable-NNN"> inside a bordered column box.
+  // --- notice in the layout editor ---------------------------------------------------
+  // Compass's editor can't drop its widgets between two of our cards (see "dragging a
+  // Compass widget"), so a short notice above the columns says so, with what to do instead.
+  // It goes away for good when it's closed.
+  const EDITOR_NOTE_ID = "compass-ext-editor-note";
+  function showEditorNote(columns) {
+    const old = document.getElementById(EDITOR_NOTE_ID);
+    if (editorNoteDismissed) { old?.remove(); return; }
+    if (!columns.length) return;
+    // The box that holds the columns (one level up when each column is wrapped).
+    let row = columns[0].parentElement;
+    if (row && row.children.length === 1 && columns.length > 1) row = row.parentElement;
+    if (!row?.parentElement) return;
+    if (old && old.nextElementSibling === row) return;
+    const note = old || document.createElement("div");
+    if (!old) {
+      note.id = EDITOR_NOTE_ID;
+      note.setAttribute("role", "note");
+      note.style.cssText = "display:flex;align-items:flex-start;gap:10px;margin:8px;padding:10px 12px;border-radius:8px;" +
+        "background:#E8F0FE;border-left:4px solid #0E6CD9;color:#203249;font:13px/1.45 Cabin,Roboto,system-ui,sans-serif;";
+      const text = document.createElement("div");
+      text.style.flex = "1";
+      const title = document.createElement("strong");
+      title.textContent = "Extension widgets in the editor can be a little fiddly. ";
+      text.append(title,
+        "A Compass widget can go above or below the extension widgets in a column, but not between two extension widgets. " +
+        "To change the order, drag the extension widgets themselves. As with Compass widgets, changes are kept only when you click Save.");
+      const close = document.createElement("button");
+      close.type = "button";
+      close.textContent = "×";
+      close.title = "Close this notice";
+      close.setAttribute("aria-label", "Close this notice");
+      close.style.cssText = "flex:none;width:26px;height:26px;border:0;border-radius:50%;background:transparent;color:#545F73;" +
+        "font-size:18px;line-height:1;cursor:pointer;";
+      close.onclick = () => {
+        editorNoteDismissed = true;
+        try { chrome.storage.local.set({ [EDITOR_NOTE_KEY]: true }); } catch (_) {}
+        note.remove();
+      };
+      note.append(text, close);
+    }
+    row.parentElement.insertBefore(note, row);
+  }
+
   function findEditorColumns(layout) {
     const first = layout.querySelector('[id^="sortable-"]');
     if (!first) return null;
@@ -516,8 +670,12 @@
   // place, so record where our cards are now, before arrange() moves them by the old
   // numbers. Only when the column count is the same and all our cards are in the columns.
   let compassLayout = "";
+  // The order of Compass's widgets in each column, as one string.
+  function layoutKey(columns) {
+    return columns.length + ":" + columns.map((c) => [...c.children].filter((k) => !isOurs(k)).map((k) => k.id).join(",")).join("|");
+  }
   function noteCompassChanges(columns, shown) {
-    const now = columns.length + ":" + columns.map((c) => [...c.children].filter((k) => !isOurs(k)).map((k) => k.id).join(",")).join("|");
+    const now = layoutKey(columns);
     const before = compassLayout;
     compassLayout = now;
     if (!before || before === now || before.split(":")[0] !== String(columns.length)) return;
@@ -525,7 +683,7 @@
   }
 
   function place() {
-    if (dragging || !ready) return;
+    if (dragging || compassDrag || !ready) return;
     for (const def of CARDS) if (hidden.has(def.id)) removeCard(def);
     const cardsShown = CARDS.some((c) => !hidden.has(c.id));
     const welcome = !EDITING && !welcomeDismissed && !cardsShown;
@@ -537,6 +695,7 @@
     if (!found) return;
     const shown = CARDS.filter((def) => !hidden.has(def.id));
     if (EDITING) noteCompassChanges(found.columns, shown);
+    if (EDITING) showEditorNote(found.columns);
     if (welcome) shown.unshift(WELCOME); // with no cards shown, it's the only one
     for (const def of shown) {
       if (!def.el) {

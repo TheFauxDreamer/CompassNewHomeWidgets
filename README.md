@@ -41,6 +41,28 @@ This setting opens every class roll on each refresh (one request for each class)
 It uses the class list from Schedule Builder and the period structure from Compass. If your Compass account can't see these, the chart shows the AM or PM roll.
 To go back, select **By the AM or PM roll**.
 
+### Attendance Today
+
+This widget shows the attendance across the school day, on one time axis. A red line marks the current time.
+Click **Periods** or **On site** to change the graph. The browser keeps your choice.
+
+- **Periods** shows one bar for each period of the Compass period structure (AM and PM in many primary schools).
+  Each bar shows Present, Excursion, Approved absence, Unapproved absence and Not marked, with the same colours as the Attendance widget.
+  The white number in a bar is the percentage present. Periods that haven't started show as dashed outlines.
+- **On site** shows the percentage of students at school through the day. The line starts from the first roll,
+  goes up when a late student arrives and goes down when a student leaves early (from Arrivals & Departures). Students on an excursion are not on site.
+- Put the pointer on a bar or on the line to see the numbers. The legend shows the counts for the latest period.
+- The chip below the title shows the year groups or the Custom Groups. Click the chip to change the selection.
+- The widget shows counts only. It never shows a student's name.
+- The widget refreshes every 15 minutes. Click the refresh button to refresh it immediately.
+
+Where the data comes from:
+
+- With an AM/PM period structure, the widget uses the Compass half-day grid (one request), and the students in unmarked rolls count as **Not marked**.
+- With more periods, the widget opens the class roll of every class for each period that has started, so it loads more slowly.
+  A circle with a count shows the progress. Rolls that are fully marked are kept until you reload the page, so a refresh opens only the rolls that can still change.
+  This uses the class list from Schedule Builder. If your Compass account can't see it, the widget shows an error.
+
 ### Unmarked Rolls
 
 This widget shows today's rolls that are not marked.
@@ -187,6 +209,11 @@ The extension widgets work in the same way as the Compass widgets in the layout 
 
 1. On the Compass homepage, open **Edit Home Page Layout**.
 2. To move a widget, drag the widget with its handle.
+   While you drag a Compass widget, the extension widgets fold to a thin blue line, so the Compass widget lands where you point.
+   The extension widgets then open again in their places: each one stays above the Compass widget that was below it (or at the end of its column).
+   To change the place of an extension widget, drag the extension widget.
+   A Compass widget can't go between two extension widgets: put it above or below them, then drag the extension widgets. A notice at the top of the editor says this; click its close button to hide it.
+   As in Compass without the extension, a drop on the gap between two widgets puts the widget at the end of the column.
 3. To remove a widget, click the delete button on the widget.
 4. To add a removed widget again, click **Add Widget**, then select the widget. The extension widgets are at the end of the list.
 5. Click **Save** or **Save and Close** to keep the changes. If you click **Close**, the changes are not kept.
@@ -260,6 +287,7 @@ Set `TEST_NAMES` back to `false` before you release the extension.
 | `src/widgets/attendance/chart.js` | The Attendance chart, for the homepage widget and the toolbar panel. |
 | `src/widgets/unmarked.js` | The Unmarked Rolls widget. |
 | `src/widgets/movements.js` | The Arrivals & Departures widget. |
+| `src/widgets/dayattendance.js` | The Attendance Today widget (period bars and the on-site line). |
 | `src/widgets/chronicle.js` | The Recent Chronicle widget. |
 | `src/widgets/relief.js` | The Relief widget. |
 | `src/widgets/period.js` | The Current Period widget. |
