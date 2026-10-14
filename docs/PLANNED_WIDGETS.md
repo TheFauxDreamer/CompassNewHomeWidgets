@@ -49,10 +49,7 @@ These ideas change the Compass widgets, as the Term Calendar dots do:
 
 ## Additions to the extension widgets
 
-- **Unmarked Rolls: email staff button.** Add the Compass "Email staff with unmarked rolls" action to the Unmarked Rolls widget, so the user does not have to open Attendance > Unmarked Rolls.
-  - HAR necessary: on Attendance > Unmarked Rolls, record the request that the button sends. **Caution:** the button sends real emails, so click it only when the emails are necessary. Right-click the request, then select **Copy > Copy as fetch**.
-  - Find out: whether Compass shows a dialog before it sends (subject, message or a list of staff), and whether it emails all staff with unmarked rolls or only the rolls that the tab's filters show.
-  - Plan: an email button in the widget header, next to the refresh button (not in the layout-editor preview). A confirmation step shows the counts, for example "Email 7 teachers about 12 unmarked rolls?". Before it sends, the widget loads the list again so the counts are correct. If the request can select rolls, send only the rolls that the widget shows (the 10-minute grace time and the year-group filter), but confirm this first. Show the result in the footer, then refresh the list. Update README.md.
+No additions are planned now.
 
 ## Rules for each new widget
 

@@ -151,7 +151,59 @@ globalThis.CompassUnmarked = (() => {
     return { items, now, yearLevels: await yearLevels };
   }
 
-  return { load, summarise, parseTeacher, REFRESH_MINUTES, GRACE_MINUTES };
+  // --- email the teachers -------------------------------------------------------------
+  // The same calls as "Email staff with unmarked rolls" on Attendance > Unmarked Rolls.
+  // Compass chooses the recipients by staff member and date range, not by roll, so the
+  // widget asks for today and then keeps only the teachers that it shows.
+  const EMAIL_SUBJECT = "You have unmarked rolls in Compass";
+  // Compass's own wording for this email.
+  const emailBody = () => "Hello,<br />\nThis is a reminder that you have Unmarked Roll/s. It is important that all rolls are marked " +
+    "in a timely manner to support our approach to maximise student engagement and learning. Please review and mark your " +
+    "unmarked rolls as soon as possible. Thank you.<br />\nPlease, click <a href=\"" + location.origin +
+    "/Records/User.aspx?#attendance-unmarked-rolls\" style=\"color:blue; text-decoration: underline;\">here</a> to mark these rolls.";
+
+  // Today, local time, as Compass's page sends it (UTC timestamps).
+  function dayRange(now) {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, -1);
+    return { startDate: start.toISOString(), endDate: end.toISOString() };
+  }
+
+  // The staff with unmarked rolls today: [{ id, name, code, info }].
+  // Compass sends each name as "Cloud Strife - cstrife"; info is like "2 unmarked rolls".
+  async function emailRecipients(now = new Date()) {
+    const range = dayRange(now);
+    const staff = await post("/Services/Attendance.svc/GetUnmarkedRollStaff?sessionstate=readonly", {
+      activity: "", yearLevel: "", ...range, location: "", staff: "", layer: "", unifiedUserIds: [],
+    });
+    if (!Array.isArray(staff?.d)) throw new Error("Couldn't read the staff with unmarked rolls from Compass.");
+    if (!staff.d.length) return [];
+    const json = await post("/Services/Communications.svc/GetEmailWithUnmarkedRolls?sessionstate=readonly", {
+      userIds: staff.d.map(String), activityId: null, subjectUserId: null, ...range, excludeInactiveStudents: false,
+    });
+    if (!Array.isArray(json?.d)) throw new Error("Couldn't read the email recipients from Compass.");
+    return json.d.map((r) => {
+      const m = /^(.*)\s-\s(\S+)$/.exec(String(r.name || ""));
+      return { id: r.id, name: m ? m[1].trim() : String(r.name || ""), code: m ? m[2].toLowerCase() : "", info: String(r.additionalInfo || "") };
+    });
+  }
+
+  // Sends Compass's unmarked-rolls email to these staff user IDs. Real emails.
+  async function sendEmail(ids) {
+    const userIds = ids.map(String);
+    const allowed = await post("/Services/Communications.svc/CheckCompassAllowEmailFlagForUserIds?sessionstate=readonly",
+      { userIds, alumniMode: false });
+    if (allowed?.d !== true) throw new Error("Compass doesn't allow email to some of these staff. Use Attendance > Unmarked Rolls instead.");
+    const sent = await post("/Services/Communications.svc/SendEmail?sessionstate=readonly", {
+      subject: EMAIL_SUBJECT, templateBcc: "", includeContext: true, maskEmail: true, body: emailBody(),
+      recipients: userIds, activityId: null, subjectUserId: null, emailAttachments: [],
+      includeLeftParents: false, includeLeftStudents: false, enablePlaceHolders: false, additionalPlaceHolderArguments: [],
+      customSource: null, templateContext: "2", usesCustomisableTemplate: false, usesAdvancedEditor: false, chronicleEntryUserIds: [],
+    });
+    if (sent?.d !== true) throw new Error("Compass didn't send the email.");
+  }
+
+  return { load, summarise, parseTeacher, emailRecipients, sendEmail, REFRESH_MINUTES, GRACE_MINUTES };
 })();
 
 globalThis.CompassUnmarkedUI = (() => {
@@ -198,8 +250,23 @@ globalThis.CompassUnmarkedUI = (() => {
     .srow .name { font-size: 13px; }
     .srow .detail { color: #5f6368; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .srow .chip { margin-left: auto; }
+    #email[aria-expanded="true"] { background: rgba(14, 108, 217, .12); color: #0E6CD9; }
+    #email:disabled { opacity: .4; cursor: default; }
+    .mail { gap: 6px; padding-bottom: 4px; }
+    .mail .q { font-weight: 600; font-size: 14px; margin-top: 2px; }
+    .mail .who { display: flex; flex-direction: column; gap: 2px; font-size: 12px; overflow-y: auto; }
+    .mail .who div { display: flex; justify-content: space-between; gap: 8px; }
+    .mail .who span:last-child { color: #5f6368; white-space: nowrap; }
+    .mail .ynote { color: #5f6368; font-size: 12px; }
+    .mail .err { color: #b3261e; }
+    .mail .actions { display: flex; gap: 6px; margin-top: 2px; }
+    .mail .send { background: #0E6CD9; color: #fff; font-weight: 600; border-radius: 999px; padding: 4px 12px; }
+    .mail .send:hover { background: #0B5AB5; }
+    .mail .send:disabled { opacity: .6; cursor: default; }
     @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
   `;
+  // Material "mail"
+  const MAIL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2m0 4-8 5-8-5V6l8 5 8-5z"/></svg>';
   const CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg>';
   const WARN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 21h22L12 2zm12-3h-2v-2h2zm0-4h-2v-4h2z"/></svg>';
 
@@ -210,7 +277,7 @@ globalThis.CompassUnmarkedUI = (() => {
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
   function mount(host, { preview = false } = {}) {
-    const { load, summarise, REFRESH_MINUTES, GRACE_MINUTES } = globalThis.CompassUnmarked;
+    const { load, summarise, emailRecipients, sendEmail, REFRESH_MINUTES, GRACE_MINUTES } = globalThis.CompassUnmarked;
     const { CSS, ICONS } = globalThis.CompassTheme;
     const root = host.shadowRoot || host.attachShadow({ mode: "open" });
     root.innerHTML = `
@@ -218,6 +285,7 @@ globalThis.CompassUnmarkedUI = (() => {
       <div class="wrap widget">
         <header>
           <h1>Unmarked Rolls</h1>
+          ${preview ? "" : `<button id="email" title="Email the teachers with unmarked rolls" aria-expanded="false" disabled>${MAIL}</button>`}
           ${preview ? "" : `<button id="refresh" title="Refresh now">${ICONS.refresh}</button>`}
         </header>
         <div class="yrow" id="yrow">
@@ -230,6 +298,7 @@ globalThis.CompassUnmarkedUI = (() => {
         <div class="yarea" id="yarea">
           <div class="summary" id="summary"></div>
           <div class="list" id="list"></div>
+          <div class="ypanel mail" id="mail" hidden></div>
         </div>
         <div class="foot" id="foot"></div>
       </div>`;
@@ -259,7 +328,7 @@ globalThis.CompassUnmarkedUI = (() => {
     }
 
     // This filter is the same as the filter in the attendance chart. The two widgets keep different selections.
-    const yearFilter = globalThis.CompassYears.filter({ onChange: (next) => setYears(next, true) });
+    const yearFilter = globalThis.CompassYears.filter({ onChange: (next) => setYears(next, true), onOpen: () => openMail(false) });
     $("yrow").prepend(yearFilter.chip);
     $("yarea").append(yearFilter.panel);
     const showYears = () => yearFilter.set(lastData ? yearOptions() : [], years);
@@ -469,11 +538,113 @@ globalThis.CompassUnmarkedUI = (() => {
         else if (view === "year") renderByYear(res, now);
         else renderByTeacher(res, now);
       }
-      setFoot(`Updated ${fmtTime(res.updated)} · ${footText().toLowerCase()}`);
+      if (!preview) $("email").disabled = !res.total;
+      setFoot(`${mailNote ? mailNote + " · " : ""}Updated ${fmtTime(res.updated)} · ${footText().toLowerCase()}`);
     }
 
-    async function refresh() {
-      if (busy) return;
+    // --- email the teachers (Compass's "Email staff with unmarked rolls") ---------------
+    // Sends real emails, so it always asks first. Before it asks, it loads the list again
+    // so the counts are current, and it emails only the teachers that the list shows.
+    const mail = $("mail");
+    let mailNote = "";  // the footer note after an email, e.g. "Emailed 3 teachers at 9:41am"
+    let mailId = 0;     // ignores a check that finishes after the panel was closed
+
+    function mailPanel(...parts) {
+      mail.textContent = "";
+      mail.append(...parts.filter(Boolean));
+    }
+    function mailButtons(sendText, onSend) {
+      const row = el("div", "actions");
+      if (onSend) {
+        const send = el("button", "send", sendText);
+        send.type = "button";
+        send.onclick = () => { send.disabled = true; onSend(); };
+        row.append(send);
+      }
+      const cancel = el("button", null, onSend ? "Cancel" : "Close");
+      cancel.type = "button";
+      cancel.onclick = () => openMail(false);
+      row.append(cancel);
+      return row;
+    }
+
+    function openMail(on) {
+      if (preview) return;
+      mail.hidden = !on;
+      $("email").setAttribute("aria-expanded", String(on));
+      if (!on) { mailId++; return; }
+      yearFilter.close();
+      checkMail();
+    }
+
+    async function checkMail() {
+      const id = ++mailId;
+      mailPanel(el("div", "ynote", "Checking the unmarked rolls…"));
+      try {
+        await refresh();
+        const recipients = lastData ? await emailRecipients() : [];
+        if (id !== mailId) return;
+        const res = summarise(lastData?.items || [], lastData?.now, GRACE_MINUTES, years);
+        // A roll with more than one current teacher has codes like "cstrife+tlockhart".
+        const byCode = new Map(recipients.filter((r) => r.code).map((r) => [r.code, r]));
+        const matched = [], missing = [];
+        for (const t of res.teachers) {
+          const found = t.code.split("+").map((c) => byCode.get(c.toLowerCase())).filter(Boolean);
+          if (found.length) matched.push({ t, found }); else missing.push(t);
+        }
+        const ids = [...new Set(matched.flatMap((m) => m.found.map((r) => r.id)))];
+        if (!ids.length) {
+          mailPanel(el("div", "q", "No teachers to email"),
+            el("div", "ynote", res.total ? "Compass has none of the teachers in this list as having unmarked rolls today." : "All the rolls in this list are marked."),
+            mailButtons());
+          return;
+        }
+        const rolls = matched.reduce((n, m) => n + m.t.rolls.length, 0);
+        const who = el("div", "who");
+        for (const { t } of matched) {
+          const row = el("div");
+          row.append(el("span", null, N.staff(t).name), el("span", null, `${t.rolls.length} roll${t.rolls.length === 1 ? "" : "s"}`));
+          who.append(row);
+        }
+        const left = [
+          res.otherYears && years !== null && "teachers whose rolls are only in other year groups",
+          `rolls that started less than ${GRACE_MINUTES} min ago`,
+        ].filter(Boolean);
+        mailPanel(
+          el("div", "q", `Email ${ids.length} teacher${ids.length === 1 ? "" : "s"} about ${rolls} unmarked roll${rolls === 1 ? "" : "s"}?`),
+          who,
+          el("div", "ynote", `Compass sends its "You have unmarked rolls" email. Not included: ${left.join(" and ")}.`),
+          missing.length && el("div", "ynote err", `Compass has no email match for: ${missing.map((t) => N.staff(t).name).join(", ")}.`),
+          mailButtons("Send email", () => doSend(ids)),
+        );
+      } catch (e) {
+        if (id !== mailId) return;
+        mailPanel(el("div", "q err", "Couldn't check the email"), el("div", "ynote", e.message || String(e)), mailButtons());
+      }
+    }
+
+    async function doSend(ids) {
+      const id = mailId;
+      mailPanel(el("div", "ynote", "Sending…"));
+      try {
+        await sendEmail(ids);
+        mailNote = `Emailed ${ids.length} teacher${ids.length === 1 ? "" : "s"} at ${fmtTime(new Date())}`;
+        if (id === mailId) openMail(false);
+        refresh();
+      } catch (e) {
+        if (id !== mailId) return;
+        mailPanel(el("div", "q err", "The email wasn't sent"), el("div", "ynote", e.message || String(e)), mailButtons());
+      }
+    }
+    mail.addEventListener("keydown", (e) => { if (e.key === "Escape") { openMail(false); $("email").focus(); } });
+
+    let loading = null; // the load in progress, so a caller can wait for it
+    function refresh() {
+      if (busy) return loading;
+      return (loading = doRefresh());
+    }
+
+    async function doRefresh() {
       busy = true;
       skeleton();
       if (!lastLoaded) setFoot(footText());
@@ -496,7 +667,8 @@ globalThis.CompassUnmarkedUI = (() => {
       return {};
     }
 
-    $("refresh").onclick = refresh;
+    $("refresh").onclick = () => refresh();
+    $("email").onclick = () => openMail(mail.hidden);
     refresh();
     const offNames = N.onChange(() => { if (lastData && !busy) render(); });
 

@@ -1,2 +1,5 @@
 # Claude Code local rules and settings (not shared)
 .claude/
+
+# HAR recordings contain student data and login cookies (never commit them)
+*.har

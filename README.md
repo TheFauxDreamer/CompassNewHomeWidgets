@@ -30,6 +30,13 @@ This widget shows today's rolls that are not marked.
 - A roll shows in the list 10 minutes after it starts. This gives the teacher time to mark the roll.
 - Click **Teacher** to sort the rolls by teacher. Click **Time** to sort the rolls by start time. Click **Year** to sort the rolls by year group.
 - When a relief teacher has the class, the list shows the relief teacher.
+- Click the email button to send Compass's "You have unmarked rolls" email to the teachers in the list. This sends real emails, so the widget asks first:
+  1. The widget loads the list again, then shows the teachers and the number of rolls, for example "Email 3 teachers about 5 unmarked rolls?".
+  2. Click **Send email** to send, or **Cancel**.
+  3. The footer shows "Emailed 3 teachers at 9:41am", and the list refreshes.
+
+  Only the teachers in the list get the email. Teachers whose rolls are only in other year groups, or whose rolls started less than 10 minutes ago, do not get it.
+  Compass adds each teacher's unmarked rolls of today to the email, so a teacher can also see rolls that the year-group filter hides.
 - The chip below the title shows the year groups in the list. Click the chip to change the year groups.
 - The widget refreshes every 15 minutes. Click the refresh button to refresh it immediately.
 
