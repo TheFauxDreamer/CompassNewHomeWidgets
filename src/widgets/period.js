@@ -40,13 +40,14 @@ globalThis.CompassPeriodUI = (() => {
     .empty { height: 100px; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; text-align: center; color: #5f6368; }
     .primary { background: #0E6CD9; color: #fff; font-weight: 600; border-radius: 999px; padding: 4px 12px; }
     .primary:hover { background: #0B5AB5; }
-    .foot { color: #5f6368; font-size: 12px; margin-top: 6px; height: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .sk { background: linear-gradient(90deg, #EEF0F3 25%, #F6F7F9 50%, #EEF0F3 75%); background-size: 200% 100%;
       animation: shimmer 1.2s linear infinite; border-radius: 6px; }
     @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
     #setup[aria-expanded="true"] { background: rgba(14, 108, 217, .12); color: #0E6CD9; }
     /* Setup panel (covers the timeline, like the year-group filter). */
     .setup { gap: 4px; padding-bottom: 4px; }
+    /* The panel is a flex column: keep the switches and links at their own width, on the left. */
+    .setup > .seg, .setup > .link, .setup > .actions { align-self: flex-start; }
     .setup .seg button { color: #3E4B62; }
     .setup .seg button[aria-pressed="true"] { color: #fff; }
     .setup .ynote { color: #5f6368; font-size: 12px; }
@@ -94,11 +95,9 @@ globalThis.CompassPeriodUI = (() => {
           <div id="timeline"></div>
           <div class="ypanel setup" id="panel" hidden></div>
         </div>
-        <div class="foot" id="foot"></div>
       </div>`;
     const $ = (id) => root.getElementById(id);
     globalThis.CompassNames.attach(root);
-    const setFoot = (text) => { $("foot").textContent = $("foot").title = text; };
 
     // { day, periods, source, other } from the last load. other: the day is not today.
     let shown = null;
@@ -192,14 +191,23 @@ globalThis.CompassPeriodUI = (() => {
       if (error) {
         setSummary("Couldn't load the periods", [], "err");
         setNext(error);
-        $("timeline").textContent = "";
+        const tl = $("timeline");
+        tl.textContent = "";
+        if (!preview) {
+          const box = el("div", "empty");
+          const b = el("button", "primary", "Use a custom timetable");
+          b.type = "button";
+          b.onclick = () => openSetup(true);
+          box.append(b);
+          tl.append(box);
+        }
         return;
       }
       if (!shown) return;
       const { day, periods, other } = shown;
       if (!periods.length) { drawEmpty(); return; }
       if (other) {
-        setSummary("No classes today", fmtDay(now), "quiet");
+        setSummary(shown.note || "No classes today", fmtDay(now), "quiet");
         setNext("Next school day: ", el("b", null, fmtDay(day)), ` · starts ${fmtTime(periods[0].start)}`);
         drawTimeline(periods, now, { faded: true });
         return;
@@ -230,18 +238,17 @@ globalThis.CompassPeriodUI = (() => {
         const now = new Date();
         let res = await P.display(now);
         let day = now, other = false;
+        const note = res.note; // the name Compass gives today when there's no school
         if (!res.periods.length) {
           const next = await P.nextDay(now);
           if (next) { res = next; day = next.day; other = true; }
         }
         if (id !== loadId) return;
         error = "";
-        shown = { day, periods: res.periods, source: res.source, other };
-        setFoot(res.source === "compass" ? "Compass period structure" : "Custom timetable · set up with the gear button");
+        shown = { day, periods: res.periods, source: res.source, other, note };
       } catch (e) {
         if (id !== loadId) return;
         error = e.message || String(e);
-        setFoot("");
       }
       draw();
     }
@@ -298,7 +305,8 @@ globalThis.CompassPeriodUI = (() => {
         panel.append(segOf([["compass", "Compass periods"], ["custom", "Custom timetable"]], source, (v) => { source = v; drawSetup(); }));
       }
       if (source === "compass") {
-        panel.append(el("div", "ynote", "The widget shows the period structure from Compass."));
+        panel.append(el("div", "ynote", "The widget shows the school's default period structure from Compass (Configure > Period Structures). " +
+          "Use a custom timetable when your teaching day is different, for example a primary school that marks AM/PM rolls."));
       } else {
         const days = [["all", "Mon–Fri", "The timetable for every school day"],
           ...[1, 2, 3, 4, 5].map((d) => [String(d), P.WEEKDAYS[d].slice(0, 3), `${P.WEEKDAYS[d]} only`])];
@@ -380,7 +388,7 @@ globalThis.CompassPeriodUI = (() => {
 
     if (preview) {
       skeleton();
-      setFoot("Preview – the timeline shows on the homepage");
+      setNext("Preview – the timeline shows on the homepage");
       return {};
     }
 

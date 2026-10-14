@@ -1,8 +1,8 @@
 // The periods of a school day, for the Current Period widget.
 //
 // Two sources:
-//   - Compass: the Period Structures of the school. In a primary school this is often
-//     only AM and PM.
+//   - Compass (the default): the school's default Period Structure for the year, from
+//     Configure > Period Structures. In a primary school this is often only AM and PM.
 //   - Custom: a timetable that the user types in the widget. Use it when the teaching
 //     timetable is different from the Compass structure (for example, a primary school
 //     that marks AM/PM rolls but teaches Literacy, Recess, Numeracy, Lunch…).
@@ -10,9 +10,7 @@
 //
 // A period is { name, start: Date, finish: Date, kind: "class" | "break" }.
 globalThis.CompassPeriods = (() => {
-  // The Compass request for Period Structures is not known yet (it needs a HAR file).
-  // Until then, only the custom timetable works.
-  const COMPASS_AVAILABLE = false;
+  const COMPASS_AVAILABLE = true;
 
   const SOURCE_KEY = "periodSource";  // "compass" | "custom"
   const CUSTOM_KEY = "customPeriods"; // { all: [row], days: { "1": [row], … "5": [row] } }
@@ -44,18 +42,106 @@ globalThis.CompassPeriods = (() => {
       .sort((a, b) => a.start - b.start);
   }
 
-  async function compass(/* date */) {
-    throw new Error("The Compass period structure isn't connected yet. Use a custom timetable.");
+  // --- Compass period structure (the same calls as Configure > Period Structures) ------
+  async function post(path, body) {
+    const res = await fetch(path, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+      body: JSON.stringify(body),
+    });
+    if (res.redirected || res.status === 401 || res.status === 403) {
+      throw new Error("Compass didn't give the period structure. Check you're still logged in, or use a custom timetable.");
+    }
+    if (!res.ok) throw new Error(`Compass returned HTTP ${res.status}`);
+    try { return await res.json(); }
+    catch (_) { throw new Error("Compass returned something that wasn't JSON. Your session may have expired."); }
+  }
+
+  // "2025-01-01T00:30:00Z" -> "08:30" in local time. Compass keeps only the time of day
+  // and puts it on a fixed date.
+  const hm = (iso) => {
+    const d = new Date(iso);
+    return isNaN(d) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+
+  // The school's default structure for a year:
+  //   { name, cycleLength, days: Map(cycle day -> rows), byPdid: Map(period day id -> rows),
+  //     calendar: Map("20261014" -> { teaching, pdid, name }) or null }
+  // Rows are like the custom rows, so fromRows() reads both. The calendar (Configure >
+  // Period Structures > calendar) gives each date's cycle day and the days with no school.
+  const structures = new Map(); // year -> promise
+  function structure(year) {
+    if (!structures.has(year)) {
+      const promise = (async () => {
+        const list = await post("/Services/ReferenceData.svc/GetAllActivePeriodStructures?sessionstate=readonly",
+          { year, page: 1, start: 0, limit: 25 });
+        const all = Array.isArray(list?.d) ? list.d : [];
+        const s = all.find((x) => x.isDefault) || all[0];
+        if (!s) throw new Error(`Compass has no period structure for ${year}.`);
+        const [days, periods, cal] = await Promise.all([
+          post("/Services/ReferenceData.svc/GetPeriodDaysBySelectedPeriodStructure", { year: String(year), periodStructureId: String(s.id) }),
+          post("/Services/ReferenceData.svc/GetAllPeriodsForStructure", { structureId: s.id, year, page: 1, start: 0, limit: 500 }),
+          // Without the calendar the widget can still work out simple structures (see compass()).
+          post("/Services/ReferenceData.svc/GetCalendarDataForPeriodStructure", { year: String(year), periodStructureId: String(s.id) }).catch(() => null),
+        ]);
+        if (!Array.isArray(days?.d) || !Array.isArray(periods?.d)) throw new Error("Couldn't read the period structure from Compass.");
+        const dayOf = new Map(days.d.map((x) => [x.id, Number(x.d)])); // period day id -> cycle day 1, 2, …
+        const byDay = new Map(), byPdid = new Map();
+        for (const p of [...periods.d].sort((a, b) => (a.pn ?? 0) - (b.pn ?? 0))) {
+          const row = { name: String(p.n || `P${p.pn}`).trim(), start: hm(p.s), finish: hm(p.f), kind: "class" };
+          if (!byPdid.has(p.pdid)) byPdid.set(p.pdid, []);
+          byPdid.get(p.pdid).push(row);
+          const day = dayOf.get(p.pdid);
+          if (!day) continue;
+          if (!byDay.has(day)) byDay.set(day, []);
+          byDay.get(day).push(row);
+        }
+        const rows = Array.isArray(cal?.d?.d) ? cal.d.d : null;
+        const calendar = rows && new Map(rows.map((r) => [String(r.dateEqualityProperty),
+          { teaching: !!r.td, pdid: r.pdid, name: String(r.n || "").trim() }]));
+        return { name: String(s.name || "Default"), cycleLength: Number(s.cycleLength) || byDay.size, days: byDay, byPdid, calendar };
+      })();
+      promise.catch(() => structures.delete(year)); // ask again after an error
+      structures.set(year, promise);
+    }
+    return structures.get(year);
+  }
+
+  const dateKey = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+
+  // The Compass periods for the day of `date`. A day with no school has none; when Compass
+  // names the day (for example "School Development Day"), the list has that name as `note`.
+  async function compass(date) {
+    const s = await structure(date.getFullYear());
+    if (s.calendar) {
+      const day = s.calendar.get(dateKey(date));
+      if (!day || !day.teaching || !s.byPdid.has(day.pdid)) return Object.assign([], { note: day?.name || "" });
+      return fromRows(s.byPdid.get(day.pdid), date);
+    }
+    // No calendar: when every cycle day has the same periods (for example AM and PM) the
+    // cycle day doesn't matter, and a 5-day cycle follows the weekdays. Holidays can't be told.
+    const weekday = date.getDay();
+    if (weekday === 0 || weekday === 6) return [];
+    const lists = [...s.days.values()];
+    if (!lists.length) return [];
+    const key = (rows) => JSON.stringify(rows);
+    let rows;
+    if (lists.every((l) => key(l) === key(lists[0]))) rows = lists[0];
+    else if (s.cycleLength === 5) rows = s.days.get(weekday) || [];
+    else throw new Error(`The Compass structure "${s.name}" has a ${s.cycleLength}-day cycle with different days, and the widget can't tell today's cycle day yet. Use a custom timetable.`);
+    return fromRows(rows, date);
   }
 
   function settings() {
     return new Promise((res) => {
       try {
         chrome.storage.local.get([SOURCE_KEY, CUSTOM_KEY], (r) => res({
-          source: COMPASS_AVAILABLE && r?.[SOURCE_KEY] === "compass" ? "compass" : "custom",
+          // Compass by default; "custom" once the user saves a custom timetable.
+          source: COMPASS_AVAILABLE && r?.[SOURCE_KEY] !== "custom" ? "compass" : "custom",
           custom: r?.[CUSTOM_KEY] && typeof r[CUSTOM_KEY] === "object" ? r[CUSTOM_KEY] : { all: [], days: {} },
         }));
-      } catch (_) { res({ source: "custom", custom: { all: [], days: {} } }); }
+      } catch (_) { res({ source: COMPASS_AVAILABLE ? "compass" : "custom", custom: { all: [], days: {} } }); }
     });
   }
 
@@ -63,7 +149,7 @@ globalThis.CompassPeriods = (() => {
   async function display(date) {
     const s = await settings();
     const periods = s.source === "compass" ? await compass(date) : fromRows(rowsFor(s.custom, date), date);
-    return { source: s.source, periods };
+    return { source: s.source, periods, note: periods.note || "" };
   }
 
   // The next day after `date` that has periods (up to 2 weeks ahead), or null.
@@ -96,7 +182,7 @@ globalThis.CompassPeriods = (() => {
   }
 
   return {
-    COMPASS_AVAILABLE, WEEKDAYS, display, nextDay, current, settings, saveSource, saveCustom, onChange,
+    COMPASS_AVAILABLE, WEEKDAYS, compass, display, nextDay, current, settings, saveSource, saveCustom, onChange,
     validRow, rowsFor, fromRows,
   };
 })();

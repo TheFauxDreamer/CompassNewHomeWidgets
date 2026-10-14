@@ -74,17 +74,21 @@ This widget shows a timeline of the school day, with a red playhead at the curre
 - Before school, between periods and after school, the widget says so and shows the next period.
 - On a day with no periods (for example, the weekend), the widget shows the next school day's timeline, faded.
 
-The widget uses a custom timetable. This is useful when the teaching timetable is different from the Compass period structure,
+The widget uses the school's default period structure from Compass (Configure > Period Structures).
+It uses the Compass calendar for the cycle day of each date, and it knows the days with no school (for example, a School Development Day shows its name).
+Between two periods, the widget shows "Between periods" and the next period.
+
+Use a custom timetable when the teaching timetable is different from the Compass period structure,
 for example in a primary school that marks AM/PM rolls. The custom timetable is for this widget only. It does not change the attendance.
 
-To set up the timetable:
+To set up a custom timetable:
 
-1. Click the gear button on the widget.
+1. Click the gear button on the widget, then click **Custom timetable**.
 2. Click **+ Add a period**, then type the name, the start and the finish. Tick **Break** for recess or lunch.
 3. **Mon–Fri** is the timetable for every school day. To make one day different, click the day, then click **Give … its own timetable**.
 4. Click **Save**. The browser keeps the timetable.
 
-The Compass period structure will be available as a source when the extension knows the Compass request for it.
+To go back to the Compass period structure, click the gear button, click **Compass periods**, then click **Save**.
 
 ### Relief
 
