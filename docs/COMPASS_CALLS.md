@@ -1,0 +1,121 @@
+# Compass calls
+
+This file lists every Compass request that the extension makes, and the requests that we have seen in Compass but don't use yet.
+Use it to find which widget depends on which request, and to find data for new widgets.
+
+## How the calls work
+
+- The scripts run inside the Compass page, so each request uses the user's own Compass login (`credentials: "include"`). The user sees only the data that their Compass account can see.
+- Most calls are `POST` with a JSON body, and the headers `Content-Type: application/json`, `Accept: application/json` and `X-Requested-With: XMLHttpRequest`.
+- Most `.svc` responses are `{ "d": … }`. A list is `d` (an array), or `d.data` with `d.total`. Paged calls take `page`, `start` and `limit`.
+- `?sessionstate=readonly` is on most read calls, as Compass's own pages send it.
+- When Compass sends a redirect, 401 or 403, the login has expired. Each widget shows "Check you're still logged in".
+- Field names are short (for example `n` = name, `s` = start, `f` = finish). The tables give the meaning.
+- The only request to a service that isn't Compass is the Weather widget's request to the Bureau of Meteorology (see README.md).
+
+All examples in this file use made-up names.
+
+## Calls that the extension makes
+
+### Students and year levels
+
+| Call | Body | What we use | Used by |
+| --- | --- | --- | --- |
+| `PeopleManagement.svc/GetUserIdsBySearchApiQuery` | `{ query: "'role'='student' AND 'status'IN('active','left')" }` | `d.data`: the user IDs of all students. `d.success` must be true. | Attendance, Attendance Today, Enrolment (`attendance/data.js`) |
+| `User.svc/GetStudentYearLevels` | `{ page: 1, start: 0, limit: 200 }` | `d[]`: `id`, `n` (the year level name, for example "Year 3"). | Unmarked Rolls, Arrivals & Departures, Recent Chronicle (the year filter) |
+| `PeopleManagement.svc/GetCustomGroupsByBaseRole` | `{ baseRole: "1" }` (1 = student) | `d[]`: `id`, `name`, `userBaseRole` (we keep only 1), `memberCount`. | The Custom Groups filter (`shared/groups.js`) |
+| `PeopleManagement.svc/GetCustomGroupMembers` | `{ customGroupId, page, start, limit: 500 }` | `d[]`: `id` (the user ID). No total: we stop at a short page. | The Custom Groups filter |
+
+### Attendance
+
+| Call | Body | What we use | Used by |
+| --- | --- | --- | --- |
+| `/graphql/`, operation `GetHalfDaySummaryGridLinesByWeekStart` | `{ weekStart: "2026/10/12", gridGroupId: "", gridGroupType: "UNIFIEDGROUP", unifiedUserIds: [ids] }` | One line for each student: `userId`, `isActive`, `yearLevelString`, `formGroup` (class), `houseGroup` (faction), and `days[]` with `date` ("yyyy/mm/dd") and for AM and PM: `…ExtendedStatusIdRaw`, `…StatusName`, `…StatusExportIdentifier`, `…StatusPeriodCalcNotMarked`. | Attendance, Attendance Today, Enrolment, toolbar panel (`attendance/data.js`) |
+| `Attendance.svc/GetAllUnmarkedRolls` | `{ unifiedUserIds: null, page, start, limit: 200, filter: "[{property:'start',value:'…T00:00:00',type:'>='},{property:'finish',…,type:'<='}]" }` | `d.data[]`: `id` (roll instance ID), `s`/`f` (start and finish, ISO), `n` (class), `p` (period), `l` (room), `m` (teacher HTML, see below), `yl` (year level). `d.total`. | Unmarked Rolls; Attendance and Attendance Today (to find the students in unmarked rolls) |
+| `Attendance.svc/GetRollPackage` | `{ instanceId: "<roll instance ID>" }` | `d.data.start`, `d.data.rollData[]`: `uid`, `userTimeLinePeriods[]` (every period of the student's day: `start`, `finish`, `name`, `status`, `statusName`, `exportId`, `extendedStatus.id`, `extendedStatus.periodCalc_NotMarked`). | Attendance and Attendance Today (`attendance/data.js`) |
+| `Attendance.svc/GetArrivalsAndDepartures` | `{ fromFilter: null, toFilter: null, typeFilter: null, filter: "[]", page, start, limit }` | `d.data[]`: `id`, `uid`, `n` (student), `ct` (1 = arrival, 2 = departure), `t` (time), `c` (reason), `minutesLate`, `formGroup`, `yearLevelId`, `userCreatorName`. | Arrivals & Departures, and the On site line in Attendance Today |
+
+A class roll's instance ID is the activity ID + the date (`ddmmyyyy`) + the UTC start time (`hhmm`). See `instanceIds()` in `attendance/data.js`.
+
+The teacher field `m` in the unmarked rolls is HTML. A relief teacher shows as `<s>(cstrife) Cloud STRIFE</s>&nbsp; (bwallace) Barret WALLACE`: struck-through names are away. We read it as text only.
+
+### Classes and timetable
+
+| Call | Body | What we use | Used by |
+| --- | --- | --- | --- |
+| `Subjects.svc/GetSubjectsInAcademicGroup` | `{ academicGroupId: -1, includeDataSyncSubjects: true, page: 1, start: 0, limit: 1000 }` | `d.data[]`: `id`. | Attendance "by period", Attendance Today with more than AM/PM |
+| `Subjects.svc/GetStandardClassesOfSubject` | `{ subjectId, page: 1, start: 0, limit: 1000 }` | `d.data[]`: `id` (activity ID), `start`, `finish` (when the class runs). | As above (one request for each subject) |
+| `ReferenceData.svc/GetAllActivePeriodStructures` | `{ year, page: 1, start: 0, limit: 25 }` | `d[]`: `id`, `name`, `isDefault`, `cycleLength`. | Current Period, Attendance Today, Attendance "by period" (`shared/periods.js`) |
+| `ReferenceData.svc/GetPeriodDaysBySelectedPeriodStructure` | `{ year: "2026", periodStructureId: "<id>" }` | `d[]`: `id` (period day ID), `d` (cycle day number). | As above |
+| `ReferenceData.svc/GetAllPeriodsForStructure` | `{ structureId, year, page: 1, start: 0, limit: 500 }` | `d[]`: `n` (name), `pn` (number), `s`/`f` (time of day on a fixed date), `pdid` (period day ID). | As above |
+| `ReferenceData.svc/GetCalendarDataForPeriodStructure` | `{ year: "2026", periodStructureId: "<id>" }` | `d.d[]`: `dateEqualityProperty` (the date, "20261014"), `td` (a teaching day), `pdid` (period day ID), `n` (the day's name, for example "School Development Day"). | As above. Optional: without it, the widget uses the cycle days only. |
+
+### Staff and relief
+
+| Call | Body | What we use | Used by |
+| --- | --- | --- | --- |
+| `Instance.svc/GetClassManagerLinesForClassChanges?_dc=<time>` | `{ startTime, finishTime (ISO), activityName: "", teacherId: null, runningStatus: 1, yearLevelId: null, page: 0, start: -500, limit: 500 }` (the same odd paging as the Daily Org page) | `d.data[]`: `id`, `s`/`f`, `n` (class), `p` (period), `ls[].l` (rooms), `teachers[].t` (HTML: struck-through codes are away). `d.total`. | Relief |
+| `ChronicleV2.svc/GetStaff` | `{}` (falls back to a `GET`) | `d[]`: `displayCode` (staff code), `n` (name). | Relief (code → name) |
+
+### Unmarked roll emails
+
+These calls send real emails. The widget always asks the user first.
+
+| Call | Body | What we use |
+| --- | --- | --- |
+| `Attendance.svc/GetUnmarkedRollStaff` | `{ activity: "", yearLevel: "", startDate, endDate (ISO, today), location: "", staff: "", layer: "", unifiedUserIds: [] }` | `d[]`: the user IDs of the staff with unmarked rolls today. |
+| `Communications.svc/GetEmailWithUnmarkedRolls` | `{ userIds: ["…"], activityId: null, subjectUserId: null, startDate, endDate, excludeInactiveStudents: false }` | `d[]`: `id`, `name` ("Cloud Strife - cstrife"), `additionalInfo` ("2 unmarked rolls"). |
+| `Communications.svc/CheckCompassAllowEmailFlagForUserIds` | `{ userIds, alumniMode: false }` | `d` must be `true`. |
+| `Communications.svc/SendEmail` | The subject, the body (Compass's own unmarked-rolls text), `recipients: userIds`, `templateContext: "2"` and the other fields that the Compass page sends (see `sendEmail()` in `unmarked.js`). | `d` must be `true`. |
+
+### Chronicle
+
+| Call | Body | What we use | Used by |
+| --- | --- | --- | --- |
+| `ChronicleV2.svc/GetAllEntriesThin` | `{ filter: { yearLevelFilter: [ids], studentFilter: [user IDs], entryCreatedStart, entryCreatedFinish, needsApprovalFilter: 3, … }, page, start, limit, sort: "[{property:'createdTimestamp',direction:'DESC'}]" }` | `d.data[]`: `id`, `attendeeNames`, `templateName`, `creatorName`/`userNameCreated`, `createdTimestamp`, `occurredTimestamp`. `d.total`. | Recent Chronicle |
+
+### Homepage additions
+
+| Call | Body | What we use | Used by |
+| --- | --- | --- | --- |
+| `Calendar.svc/GetCalendarEventsByUserWeb` | `{ userId, startDate: "2026-07-20", endDate, homePage: true }`. `userId` comes from `Compass.organisationUserId` in the page. | `d[]`: `start`, `finish`, `allDay`, `longTitleWithoutTime`/`title`, `backgroundColor`, `calendarId`, `activityType` (1 class, 2 event, 10 learning task), `activityTypeName`. | Term Calendar dots |
+| `Calendar.svc/GetActivityLayers` | `{}` | `d[]`: `id`, `name`, `scheduleBgColor`, `showOnHomePage`, `isHidden`. | Term Calendar dots (the calendar chooser) |
+
+The My Tasks additions (`task-extras.js`) and Countdown colours make no Compass calls. They read the widgets on the page.
+
+## Calls that we know but don't use
+
+These calls were seen in Compass pages (HAR files) or are in code that is switched off. They can give data to new widgets. Check them with a new HAR file before you build on them.
+
+### Tasks (the My Tasks widget)
+
+| Call | Body | Response |
+| --- | --- | --- |
+| `TaskService.svc/GetTaskItems` | `{ page: 1, start: 0, limit: 25 }` | `d[]`: `id`, `taskName` (one line), `status` (true = done), `dueDate`. |
+| `TaskService.svc/UpdateTaskItem` | `{ task: { id, taskName, status, dueDate } }` | `d: null`. Changes a task. It could save sub-task ticks in Compass, but it would change the task name that the user sees. |
+
+### Attendance (GraphQL, at `/graphql/`)
+
+| Operation | Variables | What it gives |
+| --- | --- | --- |
+| `GetHalfDaySummaryGridLinesByWeekStart` (more fields) | as above | Fields we don't request yet: `displayCode`, `reportName`, `lastName` (names: use only when a widget needs them), `campus`, `attendancePercentage` (each student's percentage), `timeAmountArrivedLateAm`/`Pm` (minutes late), `amStatus`/`pmStatus` (general status), `userFlags[]` (`description`, `imageUrl`), `chroniclePinnedCount`, `displayFormatName`. |
+| `GetHistoricalHalfDaySummaryGridLinesByWeekStart` | `{ weekStart }` | The same grid for past weeks (students who have left). For an attendance trend or a watchlist. |
+| `GetCurrentAttendanceWeekFilterYearMonthOptions` | `{ gridGroupType, gridGroupId, unifiedUserIds }` | `month`, `year`, `weekStarts[]`: the weeks that have attendance data. |
+| `GetExtendedStatuses`, `GetDisplayModeCurrentExtendedStatuses`, `GetExtendedStatusOptionsFor(activityType)` | — | The school's attendance codes (`name`, `systemCode`, `description`). Could fill the `STATUSES` list in `data.js` automatically. |
+| `GetReferenceData` | — | The school's reference lists (seen on the attendance page). |
+| `GetGroupActivityTrackingCases`, `GetGroupActivityTrackingCaseDetail(caseId)` | `{ activityId, status, includeExcludedActivities }` | Attendance tracking cases: student, class, missed count, status, attempts. For a "students at risk" widget. |
+| `GetInstancesOutsideOfBounds` | `{ activityId, startTime, finishTime }` | Class instances outside the period structure. |
+
+### Other
+
+| Call | Notes |
+| --- | --- |
+| `ChronicleV2.svc/GetEntry` | `{ id, archived: true }`: one full Chronicle entry with its fields. It is in `chronicle.js`, switched off (the details dialog didn't show all entries correctly). |
+| `User.svc/GetAllStaff` | `{ page: 1, start: 0, limit: 5000 }`: all staff. In the switched-off code in `chronicle.js`. |
+| `ReferenceDataCache.svc/GetAllLocations` | `GET` with `?page=1&start=0&limit=5000`: all rooms. In the switched-off code in `chronicle.js`. |
+| `ChronicleV2.svc/GetEntriesRequiringMyApproval` | The Chronicle entries that wait for the user's approval. Named in `PLANNED_WIDGETS.md`, not confirmed with a HAR file yet. |
+
+## Add a call to this file
+
+When you add a Compass call to a widget, add a row here with the call, the body, the fields that the widget uses and the widget's name.
+When you find a new call in a HAR file, add it to "Calls that we know but don't use". Replace all real names and IDs with made-up ones (see `.claude/rules/placeholder-names.md`).

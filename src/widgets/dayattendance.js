@@ -11,6 +11,11 @@ globalThis.CompassDayAttendanceUI = (() => {
   const REFRESH_MINUTES = 15;
   const SAMPLE_MINUTES = 5;   // the on-site line has one point every 5 minutes
   const CHART_HEIGHT = 150;
+  // On site, by year: one line for each year group. Eight colour-blind-checked hues in a fixed
+  // order. A year group's colour comes from its place among all the school's year groups, so a
+  // filter never repaints the others. Year groups past the eighth are not drawn (the legend says so).
+  const YEAR_COLOURS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
+  const TOTAL_COLOUR = "#203249";
 
   const CSS_EXTRA = `
     .yrow { align-items: center; justify-content: space-between; gap: 8px; }
@@ -27,6 +32,7 @@ globalThis.CompassDayAttendanceUI = (() => {
     .legend .sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
     .legend .sw.line { height: 3px; border-radius: 2px; }
     .legend .n { color: #5f6368; min-width: 0; }
+    .legend .seg button { padding: 0 8px; font-size: 11px; line-height: 18px; }
     .status { color: #5f6368; font-size: 12px; margin-top: 2px; height: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .status.err { color: #b3261e; }
     .axis { font: 10px Cabin, Roboto, system-ui, sans-serif; fill: #5f6368; }
@@ -141,7 +147,8 @@ globalThis.CompassDayAttendanceUI = (() => {
     let lastLoaded = 0, lastUpdated = null, busy = false, again = false, error = "";
     const VIEW_KEY = "dayAttendanceView";   // "periods" | "onsite"
     const YEARS_KEY = "dayYearGroups";      // array of year names; null = all; or a group selection (groups.js)
-    let view = "periods", years = null;
+    const SPLIT_KEY = "dayOnsiteSplit";     // "total" | "years": the On site view's lines
+    let view = "periods", years = null, split = "total";
     const save = (key, value) => { try { chrome.storage.local.set({ [key]: value }); } catch (_) {} };
 
     // --- filter (the same as the other widgets, with its own selection) ----------------------
@@ -167,6 +174,11 @@ globalThis.CompassDayAttendanceUI = (() => {
     }
     for (const b of root.querySelectorAll("#view button")) b.onclick = () => setView(b.dataset.v, true);
     showView();
+    function setSplit(v, fromUser) {
+      split = v === "years" ? "years" : "total";
+      if (fromUser) save(SPLIT_KEY, split);
+      draw();
+    }
 
     // The students after the filter, or null while a group's members load (then draw() runs again).
     function filtered() {
@@ -336,6 +348,7 @@ globalThis.CompassDayAttendanceUI = (() => {
 
       const legend = $("legend");
       legend.textContent = "";
+      legend.title = "";
       const legendItem = (color, text, n, { line = false, hatch = false } = {}) => {
         const item = el("span", "item");
         if (color) {
@@ -400,23 +413,64 @@ globalThis.CompassDayAttendanceUI = (() => {
           lab.textContent = fmtHour(new Date(t));
           svg.append(lab);
         }
-        if (pts.length && total) {
-          const line = pts.map((p, i) => `${i ? "L" : "M"}${x(p.time.getTime()).toFixed(1)},${y(p.count / total).toFixed(1)}`).join("");
-          svg.append(svgEl("path", { d: `${line}L${x(pts[pts.length - 1].time.getTime()).toFixed(1)},${y(0)}L${x(from)},${y(0)}Z`, fill: "#0072B2", "fill-opacity": 0.12 }));
-          svg.append(svgEl("path", { d: line, fill: "none", stroke: "#0072B2", "stroke-width": 2, "stroke-linejoin": "round" }));
-          // Hover: one column for each point, wider than the line.
-          const step = (x(from + SAMPLE_MINUTES * 60000) - x(from));
-          for (const p of pts) {
-            svg.append(svgEl("rect", { x: x(p.time.getTime()) - step / 2, y: m.t, width: step, height: H - m.t - m.b, class: "hit" },
-              `${fmtTime(p.time)} · ${p.count} of ${total} on site (${pct(p.count, total)}%)`));
+        // By year: each year group's own share on site, from the same samples.
+        const byYear = [];
+        let notDrawn = [];
+        if (split === "years" && until >= from) {
+          const school = A.yearLevels(day.students);
+          for (const yr of A.yearLevels(counted)) {
+            const slot = school.indexOf(yr);
+            if (slot < 0 || slot >= YEAR_COLOURS.length) { notDrawn.push(yr); continue; }
+            const ys = A.filterByYears(counted, [yr]);
+            byYear.push({ year: yr, colour: YEAR_COLOURS[slot], total: ys.length, pts: samples(onSiteChanges(ys, periods, moves), from, until) });
           }
+        }
+        const path = (list, tot) => list.map((p, i) => `${i ? "L" : "M"}${x(p.time.getTime()).toFixed(1)},${y(p.count / tot).toFixed(1)}`).join("");
+        if (pts.length && total) {
+          const line = path(pts, total);
+          const colour = byYear.length ? TOTAL_COLOUR : "#0072B2";
+          if (!byYear.length) svg.append(svgEl("path", { d: `${line}L${x(pts[pts.length - 1].time.getTime()).toFixed(1)},${y(0)}L${x(from)},${y(0)}Z`, fill: colour, "fill-opacity": 0.12 }));
+          for (const g of byYear) {
+            if (g.total) svg.append(svgEl("path", { d: path(g.pts, g.total), fill: "none", stroke: g.colour, "stroke-width": 2, "stroke-linejoin": "round" }));
+          }
+          // The total on top, thicker, so it reads as the main line.
+          svg.append(svgEl("path", { d: line, fill: "none", stroke: colour, "stroke-width": byYear.length ? 3 : 2, "stroke-linejoin": "round" }));
+          // Hover: one column for each point, wider than the line. By year, it lists every year group.
+          const step = (x(from + SAMPLE_MINUTES * 60000) - x(from));
+          pts.forEach((p, i) => {
+            let tip = `${fmtTime(p.time)} · ${p.count} of ${total} on site (${pct(p.count, total)}%)`;
+            for (const g of byYear) tip += `\n${g.year}: ${g.pts[i]?.count ?? 0} of ${g.total} (${pct(g.pts[i]?.count ?? 0, g.total)}%)`;
+            svg.append(svgEl("rect", { x: x(p.time.getTime()) - step / 2, y: m.t, width: step, height: H - m.t - m.b, class: "hit" }, tip));
+          });
         }
         const nowCount = pts.length ? pts[pts.length - 1].count : 0;
         const arrivals = [...moves.values()].flat().filter((e) => e.type === "arrival").length;
         const departures = [...moves.values()].flat().filter((e) => e.type === "departure").length;
-        legendItem("#0072B2", "On site", null, { line: true });
-        legendItem(null, `${arrivals} late arrival${arrivals === 1 ? "" : "s"} · ${departures} early departure${departures === 1 ? "" : "s"}`);
+        // Total / By year, at the start of the legend.
+        const seg = el("div", "seg");
+        for (const [v, text, tip] of [["total", "Total", "One line for all students"], ["years", "By year", "A line for each year group, and the total"]]) {
+          const b = el("button", null, text);
+          b.type = "button";
+          b.title = tip;
+          b.setAttribute("aria-pressed", String(split === v));
+          b.onclick = () => setSplit(v, true);
+          seg.append(b);
+        }
+        legend.append(seg);
+        if (byYear.length) {
+          legendItem(TOTAL_COLOUR, "All", `${pct(nowCount, total)}%`, { line: true });
+          for (const g of byYear) {
+            const n = g.pts.length ? g.pts[g.pts.length - 1].count : 0;
+            legendItem(g.colour, g.year, `${pct(n, g.total)}%`, { line: true });
+          }
+          if (notDrawn.length) legendItem(null, `Not drawn: ${notDrawn.join(", ")}`);
+        } else {
+          legendItem("#0072B2", "On site", null, { line: true });
+          legendItem(null, `${arrivals} late arrival${arrivals === 1 ? "" : "s"} · ${departures} early departure${departures === 1 ? "" : "s"}`);
+        }
         if (movesError) legendItem(null, "Arrivals & departures didn't load");
+        // The full legend on hover, in case some year groups don't fit.
+        legend.title = [...legend.querySelectorAll(".item")].map((i) => [...i.childNodes].map((n) => n.textContent).filter(Boolean).join(" ")).join(" · ");
         summary = pts.length ? [{ b: String(nowCount), after: ` of ${total} on site now` }, `${pct(nowCount, total)}%`] : [`School starts at ${fmtTime(periods[0].start)}`];
       }
 
@@ -506,7 +560,8 @@ globalThis.CompassDayAttendanceUI = (() => {
     }
 
     try {
-      chrome.storage.local.get([VIEW_KEY, YEARS_KEY], (r) => {
+      chrome.storage.local.get([VIEW_KEY, YEARS_KEY, SPLIT_KEY], (r) => {
+        split = r?.[SPLIT_KEY] === "years" ? "years" : "total";
         view = r?.[VIEW_KEY] === "onsite" ? "onsite" : "periods";
         showView();
         years = G.validSelection(r?.[YEARS_KEY] ?? null);
@@ -518,6 +573,7 @@ globalThis.CompassDayAttendanceUI = (() => {
         if (area !== "local") return;
         const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
         if (VIEW_KEY in changes && changes[VIEW_KEY].newValue !== view) setView(changes[VIEW_KEY].newValue, false);
+        if (SPLIT_KEY in changes && changes[SPLIT_KEY].newValue !== split) setSplit(changes[SPLIT_KEY].newValue, false);
         if (YEARS_KEY in changes && !same(changes[YEARS_KEY].newValue, years)) setYears(changes[YEARS_KEY].newValue ?? null, false);
       };
       chrome.storage.onChanged.addListener(onChanged);

@@ -62,6 +62,8 @@ globalThis.CompassAttendance = (() => {
       userId
       isActive
       yearLevelString
+      formGroup
+      houseGroup
       days {
         date
         amStatusName
@@ -337,7 +339,7 @@ globalThis.CompassAttendance = (() => {
   }
 
   // A class roll's ID is the activity ID, the date (ddmmyyyy) and the UTC start time (hhmm),
-  // for example "141" + "15102026" + "0030". The date is tried in UTC first, then local
+  // for example "7" + "01022026" + "0030" (made up). The date is tried in UTC first, then local
   // time, for time zones where the two dates differ.
   function instanceIds(aid, start) {
     const utc = `${pad(start.getUTCDate())}${pad(start.getUTCMonth() + 1)}${start.getUTCFullYear()}`;
@@ -523,7 +525,18 @@ globalThis.CompassAttendance = (() => {
     return { date, periods, students, mode: "period", rolls };
   }
 
-  return { load, loadDay, summarise, tally, unmarkedStudents, instanceIds, SESSION_KEY, yearLevels, filterByYears, filterByUsers, CATEGORIES, CATEGORY_BY_STATUS_ID, STATUSES };
+  // --- enrolment (the "Enrolment" widget) ------------------------------------------------
+  // The active students, from the same half-day grid: [{ userId, year, form, house }].
+  async function loadRoster(now = new Date()) {
+    const ids = await fetchStudentIds();
+    const lines = await fetchWeek(fmt(mondayOf(now)), ids);
+    return lines.filter((l) => l.isActive !== false).map((l) => ({
+      userId: Number(l.userId), year: yearOf(l),
+      form: String(l.formGroup || "").trim(), house: String(l.houseGroup || "").trim(),
+    }));
+  }
+
+  return { load, loadDay, loadRoster, summarise, tally, unmarkedStudents, instanceIds, SESSION_KEY, yearLevels, filterByYears, filterByUsers, CATEGORIES, CATEGORY_BY_STATUS_ID, STATUSES };
 })();
 
 if (typeof module !== "undefined") module.exports = globalThis.CompassAttendance;

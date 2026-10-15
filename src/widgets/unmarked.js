@@ -263,6 +263,12 @@ globalThis.CompassUnmarkedUI = (() => {
     .mail .send { background: #0E6CD9; color: #fff; font-weight: 600; border-radius: 999px; padding: 4px 12px; }
     .mail .send:hover { background: #0B5AB5; }
     .mail .send:disabled { opacity: .6; cursor: default; }
+    .sent { position: absolute; left: 0; right: 0; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px;
+      background: #E6F4EA; color: #1E7B34; border: 1px solid #A8DAB5; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+    .sent b { font-weight: 600; }
+    .sent span { flex: 1; min-width: 0; }
+    .sent button { background: none; color: #1E7B34; padding: 0 4px; font-size: 16px; line-height: 1; }
+    .sent[hidden] { display: none; }
     @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
   `;
   // Material "mail"
@@ -299,6 +305,7 @@ globalThis.CompassUnmarkedUI = (() => {
           <div class="summary" id="summary"></div>
           <div class="list" id="list"></div>
           <div class="ypanel mail" id="mail" hidden></div>
+          <div class="sent" id="sent" role="status" hidden></div>
         </div>
         <div class="foot" id="foot"></div>
       </div>`;
@@ -546,7 +553,7 @@ globalThis.CompassUnmarkedUI = (() => {
     // Sends real emails, so it always asks first. Before it asks, it loads the list again
     // so the counts are current, and it emails only the teachers that the list shows.
     const mail = $("mail");
-    let mailNote = "";  // the footer note after an email, e.g. "Emailed 3 teachers at 9:41am"
+    let mailNote = "";  // the footer note after an email today, e.g. "Reminder sent 9:41am"
     let mailId = 0;     // ignores a check that finishes after the panel was closed
 
     function mailPanel(...parts) {
@@ -623,13 +630,56 @@ globalThis.CompassUnmarkedUI = (() => {
       }
     }
 
+    // The emails sent today stay in the footer all day, also after a reload and in other tabs:
+    // { date: "2026-10-15", sends: [{ at: ms, teachers: n }] }. A log from another day is ignored.
+    const LOG_KEY = "unmarkedEmailLog";
+    const SENT_SECONDS = 20;
+    const todayKey = () => new Date().toDateString();
+    let sendsToday = [];
+    function showLog(log) {
+      sendsToday = log?.date === todayKey() && Array.isArray(log.sends) ? log.sends : [];
+      const times = sendsToday.map((x) => fmtTime(new Date(x.at)));
+      mailNote = times.length ? `Reminder${times.length === 1 ? "" : "s"} sent ${times.join(", ")}` : "";
+      if (lastData && !busy) render();
+    }
+    function logSend(teachers) {
+      const sends = [...sendsToday, { at: Date.now(), teachers }];
+      showLog({ date: todayKey(), sends });
+      try { chrome.storage.local.set({ [LOG_KEY]: { date: todayKey(), sends } }); } catch (_) {}
+    }
+    try {
+      chrome.storage.local.get([LOG_KEY], (r) => showLog(r?.[LOG_KEY]));
+      const onLog = (changes, area) => {
+        if (!host.isConnected && !host.parentNode) { chrome.storage.onChanged.removeListener(onLog); return; }
+        if (area === "local" && LOG_KEY in changes) showLog(changes[LOG_KEY].newValue);
+      };
+      chrome.storage.onChanged.addListener(onLog);
+    } catch (_) {}
+
+    // The confirmation banner: shows for SENT_SECONDS, or until it is closed.
+    let sentTimer = 0;
+    function showSent(teachers) {
+      const box = $("sent");
+      box.textContent = "";
+      const close = el("button", null, "×");
+      close.type = "button";
+      close.title = "Close";
+      close.onclick = () => { box.hidden = true; };
+      box.append(el("span"), close);
+      box.firstChild.append(el("b", null, "Unmarked reminder sent"), ` to ${teachers} teacher${teachers === 1 ? "" : "s"} at ${fmtTime(new Date())}`);
+      box.hidden = false;
+      clearTimeout(sentTimer);
+      sentTimer = setTimeout(() => { box.hidden = true; }, SENT_SECONDS * 1000);
+    }
+
     async function doSend(ids) {
       const id = mailId;
       mailPanel(el("div", "ynote", "Sending…"));
       try {
         await sendEmail(ids);
-        mailNote = `Emailed ${ids.length} teacher${ids.length === 1 ? "" : "s"} at ${fmtTime(new Date())}`;
+        logSend(ids.length);
         if (id === mailId) openMail(false);
+        showSent(ids.length);
         refresh();
       } catch (e) {
         if (id !== mailId) return;
@@ -678,7 +728,7 @@ globalThis.CompassUnmarkedUI = (() => {
     const onVisible = () => { if (document.visibilityState === "visible" && due()) refresh(); };
     const timer = setInterval(onVisible, 30 * 1000);
     document.addEventListener("visibilitychange", onVisible);
-    return { refresh, stop: () => { clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); offNames(); } };
+    return { refresh, stop: () => { clearInterval(timer); clearTimeout(sentTimer); document.removeEventListener("visibilitychange", onVisible); offNames(); } };
   }
 
   return { mount };

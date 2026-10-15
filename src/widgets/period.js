@@ -2,9 +2,13 @@
 // time, the period that is on now and the next one. The periods come from
 // src/shared/periods.js: the Compass structure, or a custom timetable that the user
 // sets up with the gear button (for example, a primary school's teaching timetable).
+// A custom timetable can be shared: "Copy timetable code" puts it on the clipboard as one
+// line of text, and "Paste a code" in a colleague's widget loads it for them to Save.
 globalThis.CompassPeriodUI = (() => {
   const AREA_HEIGHT = 170; // Fixed, so that the card does not change size.
   const TICK_SECONDS = 30;
+  const TICKS_KEY = "periodTicks"; // the labels under the timeline: "hours" (default) | "starts"
+  const MIN_TICK_GAP = 9;          // % of the width between two period-start labels
 
   const CSS_EXTRA = `
     .yarea { height: ${AREA_HEIGHT}px; }
@@ -63,6 +67,11 @@ globalThis.CompassPeriodUI = (() => {
     .actions .err { font-size: 12px; }
     .link { background: none; padding: 0; color: #0E6CD9; text-decoration: underline; font-size: 12px; }
     .link:hover { background: none; }
+    .share { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 2px; }
+    .share .ok { color: #1E7B34; font-size: 12px; }
+    .share .err { color: #b3261e; font-size: 12px; }
+    .share input { flex: 1 1 160px; min-width: 0; box-sizing: border-box; padding: 2px 6px; border: 1px solid #dadce0;
+      border-radius: 6px; font: inherit; font-size: 12px; font-family: ui-monospace, monospace; color: inherit; }
   `;
   // Material "settings"
   const GEAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6"/></svg>';
@@ -77,6 +86,67 @@ globalThis.CompassPeriodUI = (() => {
     return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}`;
   }
   const addMinutes = (t, n) => { const [h, m] = t.split(":").map(Number); const v = Math.min(23 * 60 + 59, h * 60 + m + n); return `${String(Math.floor(v / 60)).padStart(2, "0")}:${String(v % 60).padStart(2, "0")}`; };
+
+  // --- share codes ------------------------------------------------------------------------
+  // A custom timetable packed into one line of text, so that a colleague can paste it into
+  // their own widget instead of typing every period again. Format: "CPT1." + base64url of
+  // {a: rows, d: {"1": rows, …}}, where each row is [name, "0845", "0930", 1 if break].
+  const CODE_PREFIX = "CPT1.";
+  const packRow = (r) => [r.name.trim(), r.start.replace(":", ""), r.finish.replace(":", ""), ...(r.kind === "break" ? [1] : [])];
+  const unpackTime = (t) => (typeof t === "string" && /^\d{4}$/.test(t) ? `${t.slice(0, 2)}:${t.slice(2)}` : "");
+  const unpackRow = (a) => {
+    if (!Array.isArray(a)) throw new Error("bad row");
+    return { name: String(a[0] ?? ""), start: unpackTime(a[1]), finish: unpackTime(a[2]), kind: a[3] ? "break" : "class" };
+  };
+  function encodeShare(custom) {
+    const data = { a: custom.all.map(packRow) };
+    const days = Object.entries(custom.days);
+    if (days.length) data.d = Object.fromEntries(days.map(([d, rows]) => [d, rows.map(packRow)]));
+    const bytes = new TextEncoder().encode(JSON.stringify(data));
+    let bin = "";
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return CODE_PREFIX + btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  // Returns { all, days } or throws an Error with a message for the user.
+  function decodeShare(text, validRow) {
+    const code = String(text || "").replace(/\s+/g, "");
+    if (!code) throw new Error("Paste a code first.");
+    if (!code.startsWith(CODE_PREFIX)) throw new Error("That isn't a timetable code.");
+    let data;
+    try {
+      const b64 = code.slice(CODE_PREFIX.length).replace(/-/g, "+").replace(/_/g, "/");
+      const bin = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
+      data = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
+    } catch {
+      throw new Error("The code is damaged or incomplete. Copy it again.");
+    }
+    try {
+      if (!data || !Array.isArray(data.a)) throw 0;
+      const all = data.a.map(unpackRow);
+      const days = {};
+      for (const [d, rows] of Object.entries(data.d || {})) {
+        if (!/^[1-5]$/.test(d) || !Array.isArray(rows)) throw 0;
+        days[d] = rows.map(unpackRow);
+      }
+      if (![all, ...Object.values(days)].every((rows) => rows.every(validRow))) throw 0;
+      if (!all.length && !Object.keys(days).length) throw new Error("That code has no periods in it.");
+      return { all, days };
+    } catch (e) {
+      throw e instanceof Error ? e : new Error("The code is damaged or incomplete. Copy it again.");
+    }
+  }
+  // Clipboard API first; fall back to a selected textarea (works without clipboard permission).
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch {}
+    const ta = Object.assign(document.createElement("textarea"), { value: text });
+    ta.style.cssText = "position:fixed;left:-9999px;top:0";
+    document.body.append(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch {}
+    ta.remove();
+    return ok;
+  }
 
   function mount(host, { preview = false } = {}) {
     const P = globalThis.CompassPeriods;
@@ -102,6 +172,7 @@ globalThis.CompassPeriodUI = (() => {
     // { day, periods, source, other } from the last load. other: the day is not today.
     let shown = null;
     let error = "";
+    let tickMode = "hours";
 
     function setSummary(text, meta = [], cls = "") {
       const s = $("summary");
@@ -146,12 +217,22 @@ globalThis.CompassPeriodUI = (() => {
         track.append(blk);
       }
       const ticks = el("div", "ticks");
-      const hours = [];
-      for (let h = new Date(from); h < to; h = new Date(h.getFullYear(), h.getMonth(), h.getDate(), h.getHours() + 1)) {
-        if (h.getMinutes() === 0 && h > from) hours.push(h);
+      let labels;
+      if (tickMode === "starts") {
+        // The start of each period, and the finish of the last one. A start too close to the
+        // label before it is left out, so that the labels don't overlap.
+        const starts = [...new Set(periods.map((p) => p.start.getTime()))].map((t) => new Date(t)).filter((d) => d > from);
+        labels = [[from, fmtTime(from)]];
+        for (const d of starts) if (pct(d) - pct(labels[labels.length - 1][0]) >= MIN_TICK_GAP) labels.push([d, fmtTime(d)]);
+        labels.push([to, fmtTime(to)]);
+      } else {
+        const hours = [];
+        for (let h = new Date(from); h < to; h = new Date(h.getFullYear(), h.getMonth(), h.getDate(), h.getHours() + 1)) {
+          if (h.getMinutes() === 0 && h > from) hours.push(h);
+        }
+        const step = hours.length > 7 ? 2 : 1;
+        labels = [[from, fmtTime(from)], ...hours.filter((_, i) => i % step === step - 1).map((h) => [h, fmtHour(h)]), [to, fmtTime(to)]];
       }
-      const step = hours.length > 7 ? 2 : 1;
-      const labels = [[from, fmtTime(from)], ...hours.filter((_, i) => i % step === step - 1).map((h) => [h, fmtHour(h)]), [to, fmtTime(to)]];
       for (const [d, text] of labels) {
         const p = pct(d);
         if (d !== from && d !== to && (p < 8 || p > 92)) continue; // keep clear of the end labels
@@ -259,6 +340,8 @@ globalThis.CompassPeriodUI = (() => {
     let source = "custom";
     let editDay = "all";    // "all" (Monday to Friday) or "1" … "5"
     let tried = false;      // Save was clicked with a row that isn't valid
+    let share = null;       // null, or { mode: "copy"|"paste", text, msg, ok } for the share row
+    let ticksDraft = "hours";
 
     const rowsOf = () => (editDay === "all" ? draft.all : draft.days[editDay]);
 
@@ -343,6 +426,10 @@ globalThis.CompassPeriodUI = (() => {
           }
         }
       }
+      if (source === "custom") panel.append(shareRow());
+      panel.append(el("div", "ynote", "Times on the timeline"));
+      panel.append(segOf([["hours", "Hours", "A label on each hour"], ["starts", "Period starts", "A label at the start of each period, and at the end of the day"]],
+        ticksDraft, (v) => { ticksDraft = v; drawSetup(); }));
       const actions = el("div", "actions");
       const save = el("button", "primary", "Save");
       save.type = "button";
@@ -355,6 +442,74 @@ globalThis.CompassPeriodUI = (() => {
       panel.append(actions);
     }
 
+    // Copy this timetable as a code for colleagues, or paste a colleague's code.
+    function shareRow() {
+      const box = el("div", "share");
+      const status = () => share?.msg ? el("span", share.ok ? "ok" : "err", share.msg) : null;
+      if (share?.mode === "paste") {
+        const input = Object.assign(el("input"), { type: "text", value: share.text || "", placeholder: "Paste the code here (CPT1.…)" });
+        input.setAttribute("aria-label", "Timetable code");
+        input.oninput = () => { share.text = input.value; };
+        const load = el("button", "primary", "Load");
+        load.type = "button";
+        const apply = () => {
+          try {
+            const t = decodeShare(input.value, P.validRow);
+            draft = t;
+            editDay = "all";
+            tried = false;
+            share = { mode: null, msg: "Loaded. Check the periods, then Save.", ok: true };
+          } catch (e) {
+            share = { mode: "paste", text: input.value, msg: e.message, ok: false };
+          }
+          drawSetup();
+        };
+        load.onclick = apply;
+        input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } };
+        const back = el("button", "link", "Cancel");
+        back.type = "button";
+        back.onclick = () => { share = null; drawSetup(); };
+        box.append(input, load, back);
+        const st = status();
+        if (st) box.append(st);
+        queueMicrotask(() => input.focus());
+        return box;
+      }
+      if (share?.mode === "copy") {
+        // The clipboard was blocked: show the code so it can be copied by hand.
+        const input = Object.assign(el("input"), { type: "text", value: share.text, readOnly: true });
+        input.setAttribute("aria-label", "Timetable code");
+        input.onfocus = () => input.select();
+        const done = el("button", "link", "Done");
+        done.type = "button";
+        done.onclick = () => { share = null; drawSetup(); };
+        box.append(input, done, el("span", "ok", "Select the code and copy it (Ctrl+C)."));
+        queueMicrotask(() => { input.focus(); input.select(); });
+        return box;
+      }
+      const copy = el("button", "link", "Copy timetable code");
+      copy.type = "button";
+      copy.title = "Copy this timetable as a code that colleagues can paste into their widget";
+      copy.onclick = async () => {
+        const lists = [draft.all, ...Object.values(draft.days)];
+        if (!lists.some((rows) => rows.length)) { share = { mode: null, msg: "Add some periods first.", ok: false }; drawSetup(); return; }
+        if (lists.some((rows) => rows.some((r) => !P.validRow(r)))) { tried = true; share = null; drawSetup(); return; }
+        const text = encodeShare(draft);
+        share = (await copyText(text))
+          ? { mode: null, msg: "Code copied. Colleagues paste it with “Paste a code”.", ok: true }
+          : { mode: "copy", text };
+        drawSetup();
+      };
+      const paste = el("button", "link", "Paste a code");
+      paste.type = "button";
+      paste.title = "Set up this widget from a colleague's timetable code";
+      paste.onclick = () => { share = { mode: "paste", text: "" }; drawSetup(); };
+      box.append(copy, el("span", "ynote", "·"), paste);
+      const st = status();
+      if (st) box.append(st);
+      return box;
+    }
+
     function saveSetup() {
       const lists = [draft.all, ...Object.values(draft.days)];
       if (source === "custom" && lists.some((rows) => rows.some((r) => !P.validRow(r)))) { tried = true; drawSetup(); return; }
@@ -364,6 +519,7 @@ globalThis.CompassPeriodUI = (() => {
       for (const [d, rows] of Object.entries(draft.days)) days[d] = clean(rows);
       P.saveCustom({ all: clean(draft.all), days });
       P.saveSource(source);
+      setTicks(ticksDraft, true);
       openSetup(false);
       load(); // the storage change also loads; this covers a browser without storage events
     }
@@ -378,6 +534,8 @@ globalThis.CompassPeriodUI = (() => {
         const today = new Date().getDay();
         editDay = draft.days[today] ? String(today) : "all";
         tried = false;
+        share = null;
+        ticksDraft = tickMode;
         drawSetup();
       }
       panel.hidden = !on;
@@ -391,6 +549,20 @@ globalThis.CompassPeriodUI = (() => {
       setNext("Preview – the timeline shows on the homepage");
       return {};
     }
+
+    function setTicks(v, save) {
+      v = v === "starts" ? "starts" : "hours";
+      if (save) { try { chrome.storage.local.set({ [TICKS_KEY]: v }); } catch (_) {} }
+      if (v === tickMode) return;
+      tickMode = v;
+      draw();
+    }
+    let onTicks = null;
+    try {
+      chrome.storage.local.get([TICKS_KEY], (r) => setTicks(r?.[TICKS_KEY], false));
+      onTicks = (changes, area) => { if (area === "local" && TICKS_KEY in changes) setTicks(changes[TICKS_KEY].newValue, false); };
+      chrome.storage.onChanged.addListener(onTicks);
+    } catch (_) {}
 
     $("setup").onclick = () => openSetup(panel.hidden);
     skeleton();
@@ -406,7 +578,12 @@ globalThis.CompassPeriodUI = (() => {
     const timer = setInterval(tick, TICK_SECONDS * 1000);
     document.addEventListener("visibilitychange", tick);
     const off = P.onChange(load);
-    return { refresh: load, stop: () => { clearInterval(timer); document.removeEventListener("visibilitychange", tick); off(); } };
+    return { refresh: load, stop: () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+      off();
+      try { if (onTicks) chrome.storage.onChanged.removeListener(onTicks); } catch (_) {}
+    } };
   }
 
   return { mount };

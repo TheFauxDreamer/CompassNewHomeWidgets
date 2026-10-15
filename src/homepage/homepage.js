@@ -81,6 +81,13 @@
       after: "compass-weather-widget",
       mount: (host, preview) => globalThis.CompassPeriodUI.mount(host, { preview }),
     },
+    {
+      id: "compass-enrolment-widget",
+      title: "Enrolment (extension)",
+      posKey: "enrolmentWidgetPosition",
+      after: "compass-period-widget",
+      mount: (host, preview) => globalThis.CompassEnrolmentUI.mount(host, { preview }),
+    },
   ].map((c) => ({ ...c, el: null, api: null, positions: {} }));
 
   const HIDDEN_KEY = "hiddenWidgets"; // ids of cards removed from the homepage

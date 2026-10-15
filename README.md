@@ -26,6 +26,8 @@ The widget selects the session automatically:
 For today's session, the widget also checks the unmarked rolls that have started. The students in those rolls count as **Not marked**, even when the Compass half-day grid already shows a code for them.
 The widget opens each unmarked roll to find its students, so a day with many unmarked rolls takes a little longer to load.
 
+Students who don't come every day (for example, kindy) are counted only on their own days. On their other days Compass has no attendance record for them, so they aren't in the chart and they don't count as **Not marked**. This needs no setting.
+
 #### Count by period (optional)
 
 Compass has attendance by period only class by class. To count the current period from every class roll:
@@ -41,6 +43,7 @@ This setting opens every class roll on each refresh (one request for each class)
 It uses the class list from Schedule Builder and the period structure from Compass. If your Compass account can't see these, the chart shows the AM or PM roll.
 To go back, select **By the AM or PM roll**.
 
+
 ### Attendance Today
 
 This widget shows the attendance across the school day, on one time axis. A red line marks the current time.
@@ -51,6 +54,9 @@ Click **Periods** or **On site** to change the graph. The browser keeps your cho
   The white number in a bar is the percentage present. Periods that haven't started show as dashed outlines.
 - **On site** shows the percentage of students at school through the day. The line starts from the first roll,
   goes up when a late student arrives and goes down when a student leaves early (from Arrivals & Departures). Students on an excursion are not on site.
+  Click **By year** (at the start of the legend) to also show one coloured line for each year group. Each year group's line is the percentage of that year group on site.
+  The dark line is the total. The legend shows each year group's percentage now. Put the pointer on the graph to see every year group at that time.
+  The colours stay the same for each year group, also when you change the filter. The graph shows up to eight year groups. Click **Total** to show only the total.
 - Put the pointer on a bar or on the line to see the numbers. The legend shows the counts for the latest period.
 - The chip below the title shows the year groups or the Custom Groups. Click the chip to change the selection.
 - The widget shows counts only. It never shows a student's name.
@@ -73,7 +79,8 @@ This widget shows today's rolls that are not marked.
 - Click the email button to send Compass's "You have unmarked rolls" email to the teachers in the list. This sends real emails, so the widget asks first:
   1. The widget loads the list again, then shows the teachers and the number of rolls, for example "Email 3 teachers about 5 unmarked rolls?".
   2. Click **Send email** to send, or **Cancel**.
-  3. The footer shows "Emailed 3 teachers at 9:41am", and the list refreshes.
+  3. A green **Unmarked reminder sent** message shows at the top of the widget for 20 seconds, and the list refreshes.
+  4. The footer shows "Reminder sent 9:41am" for the rest of the day, also after a refresh or a page reload. After more than one email, it shows each time, for example "Reminders sent 9:41am, 11:02am".
 
   Only the teachers in the list get the email. Teachers whose rolls are only in other year groups, or whose rolls started less than 10 minutes ago, do not get it.
   Compass adds each teacher's unmarked rolls of today to the email, so a teacher can also see rolls that the year-group filter hides.
@@ -130,6 +137,38 @@ To set up a custom timetable:
 
 To go back to the Compass period structure, click the gear button, click **Compass periods**, then click **Save**.
 
+#### Share a custom timetable
+
+Set up the timetable one time, then share it with the other staff as a code. They don't type the periods again.
+
+1. Click the gear button, then click **Copy timetable code**. The code (one line that starts with `CPT1.`) goes on the clipboard.
+   If the browser blocks the clipboard, the code shows in a box. Select it and copy it (Ctrl+C).
+2. Send the code to the other staff, for example in an email.
+3. Each staff member clicks the gear button on their widget, clicks **Custom timetable**, then **Paste a code**. They paste the code and click **Load**.
+4. They check the periods, then click **Save**.
+
+The code includes the Mon–Fri timetable and the days that have their own timetable.
+
+#### Times on the timeline
+
+The labels below the timeline show the hours (the default). To show the start time of each period instead, click the gear button,
+click **Period starts** below **Times on the timeline**, then click **Save**. The last label shows the end of the last period.
+When two periods start very close together, the second label is left out so that the labels don't overlap. Put the pointer on a period to see its times.
+
+### Enrolment
+
+This widget shows how many students are enrolled, with the number in each group.
+
+- Click **Faction** to show the students in each faction (the house in Compass). Click **Class** to show the students in each class (the form group in Compass). Click **Year** to show the students in each year group.
+- Each row shows the number of students and a bar. The **Faction** view also shows each faction's percentage of the school. Students with no faction or class show in the last row.
+- Each faction has its own colour: the colour in its name (for example, Red, Blue, Green or Yellow). A faction without a colour in its name gets a colour from a fixed list.
+- In the **Year** and **Class** views, click **By faction** to see the factions in each year group or class. Each row then shows a bar in the faction colours and the number of students in each faction.
+  The line at the top shows each faction's total. Put the pointer on a row to see the faction names with their numbers. The browser keeps your choice.
+- The widget shows counts only. It never shows a student's name.
+- The widget refreshes every hour. Click the refresh button to refresh it immediately.
+
+The data comes from the same Compass attendance grid as the Attendance widget (active students only).
+
 ### Relief
 
 This widget shows the classes that have a relief teacher, with the teacher who is away and the relief teacher.
@@ -175,6 +214,18 @@ Your choice is saved in this browser. The list shows your school's calendars tha
 This feature lets each Compass "Countdown" widget have its own colour, so several countdowns are easy to tell apart.
 Put the pointer on a countdown, then click the round colour button at its top right. Select a colour from the list, or select **Compass default** to go back to the normal colour.
 The colour is saved in this browser, by the countdown's title. If you rename a countdown, choose its colour again.
+
+### Task list: full names and sub-tasks
+
+This feature adds to the Compass task list on the homepage.
+
+- **Full name:** put the pointer on a task to see its full name, also when the name is cut off.
+- **Sub-tasks:** put ` | ` (a space, a vertical bar, a space) between the parts of a task name. The first part is the task, and each other part is a sub-task.
+  For example, "Seventh Heaven newsletter | print | laminate" shows as "Seventh Heaven newsletter" with two sub-tasks below it: "print" and "laminate".
+  Each sub-task has its own tick box. A tick doesn't tick, open or change the main task.
+  The ticks are saved in this browser only. Compass keeps the full task name, so other browsers and the Compass app show the name with the ` | ` parts.
+
+Use ` | ` because many task names already use " - " as normal punctuation. To add or change sub-tasks, edit the task name in Compass.
 
 ### Toolbar panel
 
@@ -290,15 +341,18 @@ Set `TEST_NAMES` back to `false` before you release the extension.
 | `src/widgets/dayattendance.js` | The Attendance Today widget (period bars and the on-site line). |
 | `src/widgets/chronicle.js` | The Recent Chronicle widget. |
 | `src/widgets/relief.js` | The Relief widget. |
-| `src/widgets/period.js` | The Current Period widget. |
+| `src/widgets/period.js` | The Current Period widget, with the timetable share code. |
+| `src/widgets/enrolment.js` | The Enrolment widget (students by faction, class or year group). |
 | `src/widgets/weather.js` | The Weather widget. `src/toolbar/background.js` gets the BOM files for it. |
 | `src/homepage/welcome.js` | The welcome card that shows after a new install. |
 | `src/homepage/homepage.js` | Adds the widgets to the Compass homepage and to the layout editor. Moves and hides the widgets. Shows the welcome card while no widget is on the homepage. |
 | `src/homepage/calendar-dots.js` | Adds the event dots to the Term Calendar widget. |
 | `src/homepage/countdown-colours.js` | Adds the colour choice to the Compass Countdown widgets. |
+| `src/homepage/task-extras.js` | Adds the full names on hover and the sub-tasks to the Compass task list. |
 | `src/toolbar/background.js`, `src/toolbar/panel.js` | Open the Attendance chart from the toolbar icon. `background.js` also gets the BOM files. |
 | `icons/` | The extension icons. |
 | `docs/PLANNED_WIDGETS.md` | Ideas for new widgets. |
+| `docs/COMPASS_CALLS.md` | Every Compass request that each widget makes, and the requests we know but don't use yet. |
 
 ### Load order
 
