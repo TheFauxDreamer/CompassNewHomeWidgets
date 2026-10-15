@@ -116,11 +116,15 @@ globalThis.CompassAttendance = (() => {
     return json.d.data;
   }
 
-  async function fetchWeek(weekStart, userIds) {
+  // The grid with the students' names too, for the Period inconsistencies page only. The
+  // other widgets show counts, so they keep GRID_QUERY without names.
+  const GRID_QUERY_NAMES = GRID_QUERY.replace("      userId\n", "      userId\n      reportName\n      lastName\n");
+
+  async function fetchWeek(weekStart, userIds, query = GRID_QUERY) {
     const json = await postJson("/graphql/", {
       operationName: "GetHalfDaySummaryGridLinesByWeekStart",
       variables: { weekStart, gridGroupId: "", gridGroupType: "UNIFIEDGROUP", unifiedUserIds: userIds },
-      query: GRID_QUERY,
+      query,
     });
     if (json.errors?.length) throw new Error("Compass GraphQL error: " + json.errors[0].message);
     return json?.data?.currentOrganisation?.halfDaySummaryGridLinesByWeekStart || [];
@@ -427,14 +431,15 @@ globalThis.CompassAttendance = (() => {
   let classesPromise = null;
 
   // The activity IDs of the classes that run on `now`'s date. Fetched one time for each page.
-  async function fetchClassIds(now) {
+  // onStep(done, total) runs as the subjects' classes load (only on the first call).
+  async function fetchClassIds(now, onStep = null) {
     classesPromise ||= (async () => {
       const subj = await postJson("/Services/Subjects.svc/GetSubjectsInAcademicGroup?sessionstate=readonly",
         { academicGroupId: -1, includeDataSyncSubjects: true, page: 1, start: 0, limit: 1000 }, XRW);
       const subjects = subj?.d?.data;
       if (!Array.isArray(subjects)) throw new Error("Couldn't read the subjects from Compass.");
       const lists = await inBatches(subjects, (s) => postJson("/Services/Subjects.svc/GetStandardClassesOfSubject?sessionstate=readonly",
-        { subjectId: s.id, page: 1, start: 0, limit: 1000 }, XRW).then((j) => j?.d?.data || []).catch(() => []));
+        { subjectId: s.id, page: 1, start: 0, limit: 1000 }, XRW).then((j) => j?.d?.data || []).catch(() => []), onStep);
       return lists.flat().map((c) => ({ id: c.id, start: new Date(c.start), finish: new Date(c.finish) }));
     })();
     classesPromise.catch(() => { classesPromise = null; });
@@ -590,52 +595,274 @@ globalThis.CompassAttendance = (() => {
       return { date, periods, students, mode: "halfday", unmarkedCheck, unmarkedError };
     }
 
-    onProgress?.({ step: "classes" });
-    const aids = await fetchClassIds(now);
-    onProgress?.({ step: "rolls", label: "class rolls" });
-    const jobs = [];
-    periods.forEach((p, i) => { if (started[i]) for (const aid of aids) jobs.push({ aid, start: p.start }); });
-    const step = (done, total) => onProgress?.({ done, total, label: "class rolls" });
-    step(0, jobs.length);
-    const index = new Map(periods.map((p, i) => [p.start.getTime(), i]));
-    const byUid = new Map();
-    let rolls = 0;
-    await inBatches(jobs, async ({ aid, start }) => {
-      for (const id of instanceIds(aid, start)) {
-        let data = dayRolls.get(id);
-        if (data === undefined) {
-          data = await fetchRoll(id).catch(() => undefined);
-          if (data === undefined) continue; // an error: try again next time
-          const done = data && data.rollData.every((r) => {
-            const own = (r.userTimeLinePeriods || []).find((p) => p.start === data.start);
-            return !own || !timelineStatus(own).notMarked;
-          });
-          if (!data || done) dayRolls.set(id, data);
-        }
-        if (!data) continue;
-        rolls++;
-        for (const r of data.rollData) {
-          if (r.uid == null) continue;
-          const row = byUid.get(Number(r.uid)) || periods.map(() => null);
-          for (const entry of r.userTimeLinePeriods || []) {
-            const i = index.get(new Date(entry.start).getTime());
-            if (i == null || !started[i]) continue;
-            const st = timelineStatus(entry);
-            if (row[i] && !row[i].notMarked) continue; // a mark beats no mark
-            row[i] = st;
-          }
-          byUid.set(Number(r.uid), row);
-        }
-        break;
-      }
-    }, step);
+    const { rows, rolls } = await loadRollsForDay(periods, started, { onProgress });
     const year = new Map(lines.map((l) => [Number(l.userId), l.yearLevelString]));
-    const students = [...byUid].map(([uid, row]) => ({
-      userId: uid, yearLevelString: year.get(uid) || "",
-      statuses: row.map((s) => s && { id: s.id, name: s.name, code: s.code, category: categorise(s.id, s.notMarked) }),
-    }));
+    const students = [...rows].map(([uid, statuses]) => ({ userId: uid, yearLevelString: year.get(uid) || "", statuses }));
     const roster = lines.map((l) => ({ userId: Number(l.userId), yearLevelString: l.yearLevelString }));
     return { date, periods, students, roster, mode: "period", rolls };
+  }
+
+  // The class rolls of one day (any date): opens the roll of every class in each period that
+  // has started. Gives { rows: Map(user ID -> statuses), rolls, stoppedAfter }, with statuses as
+  // in loadDay. stoppedAfter: the name of the last period opened when the rest weren't needed.
+  // expected: a Set of user IDs, or null. With it, the rolls are opened one period at a time,
+  // and the rest are skipped once every expected student has a timeline (each roll gives the
+  // student's whole day, so one or two periods usually cover everyone).
+  // onProgress gets { step } as in loadDay; { step: "classes", done, total } while the subjects'
+  // classes load; and { step: "rolls", done, total, label, period, periodNo, periods, rolls,
+  // found, expected } while rolls load (found: the expected students found so far).
+  // stopped(): true when the user stopped the load; the rolls left are not opened.
+  async function loadRollsForDay(periods, started, { onProgress = null, expected = null, stopped = () => false } = {}) {
+    onProgress?.({ step: "classes" });
+    const aids = await fetchClassIds(periods[0].start, (done, total) => onProgress?.({ step: "classes", done, total }));
+    onProgress?.({ step: "rolls", label: "class rolls" });
+    const groups = [];
+    periods.forEach((p, i) => { if (started[i]) groups.push({ name: p.name, jobs: aids.map((aid) => ({ aid, start: p.start })) }); });
+    const total = groups.reduce((n, g) => n + g.jobs.length, 0);
+    const index = new Map(periods.map((p, i) => [p.start.getTime(), i]));
+    const byUid = new Map();
+    let rolls = 0, before = 0, found = 0, stoppedAfter = null;
+    const runs = expected ? groups : [{ name: groups.length === 1 ? groups[0].name : null, jobs: groups.flatMap((g) => g.jobs) }];
+    let run = runs[0];
+    const step = (done) => onProgress?.({ step: "rolls", label: "class rolls", done: before + done, total, rolls,
+      period: run?.name ?? null, periodNo: runs.indexOf(run) + 1, periods: runs.length, found, expected: expected?.size ?? null });
+    step(0);
+    for (const [n, r] of runs.entries()) {
+      if (expected && found >= expected.size && n > 0) { stoppedAfter = runs[n - 1].name; break; }
+      if (stopped()) break;
+      run = r;
+      step(0);
+      await inBatches(r.jobs, async ({ aid, start }) => {
+        if (stopped()) return;
+        for (const id of instanceIds(aid, start)) {
+          let data = dayRolls.get(id);
+          if (data === undefined) {
+            data = await fetchRoll(id).catch(() => undefined);
+            if (data === undefined) continue; // an error: try again next time
+            const done = data && data.rollData.every((r) => {
+              const own = (r.userTimeLinePeriods || []).find((p) => p.start === data.start);
+              return !own || !timelineStatus(own).notMarked;
+            });
+            if (!data || done) dayRolls.set(id, data);
+          }
+          if (!data) continue;
+          rolls++;
+          for (const r of data.rollData) {
+            if (r.uid == null) continue;
+            const uid = Number(r.uid);
+            if (!byUid.has(uid) && expected?.has(uid)) found++;
+            const row = byUid.get(uid) || periods.map(() => null);
+            for (const entry of r.userTimeLinePeriods || []) {
+              const i = index.get(new Date(entry.start).getTime());
+              if (i == null || !started[i]) continue;
+              const st = timelineStatus(entry);
+              if (row[i] && !row[i].notMarked) continue; // a mark beats no mark
+              row[i] = st;
+            }
+            byUid.set(uid, row);
+          }
+          break;
+        }
+      }, step);
+      before += r.jobs.length;
+    }
+    if (before < total && !stopped()) { before = total; step(0); } // the rest weren't needed
+    const rows = new Map([...byUid].map(([uid, row]) =>
+      [uid, row.map((s) => s && { id: s.id, name: s.name, code: s.code, category: categorise(s.id, s.notMarked) })]));
+    return { rows, rolls, stoppedAfter };
+  }
+
+  // --- period inconsistencies (the Period inconsistencies page) --------------------------
+  // The page is a Compass address, so it runs with the user's Compass login.
+  const INCONSISTENCY_PAGE = "/?ext=period-inconsistencies";
+
+  // Every student's marks on each of `dates` (Date objects), oldest first. Gives
+  // { days: [{ date, periods, mode, students }], errors: [{ date, error }], stopped }, where each
+  // student is { userId, name, yearLevelString, statuses } (statuses as in loadDay). Days with no
+  // school are left out. An AM/PM school uses only the half-day grid; other schools open class
+  // rolls (see loadRollsForDay), which is slow for many days.
+  // onProgress gets one of these, so the page can show each step:
+  //   { phase: "students" }, then { phase: "students", count }
+  //   { phase: "grid", done, total }                       (weeks of the half-day grid)
+  //   { phase: "day", date, day, days, state: "busy" }     (a day starts)
+  //   { phase: "classes", date, done, total }               (subjects, the first time only)
+  //   { phase: "rolls", date, done, total, rolls, period, periodNo, periods, found, expected }
+  //   { phase: "day", date, day, days, state: "done", mode, students, rolls, stoppedAfter }
+  //   { phase: "day", date, day, days, state: "skip", note } (no school, or no period started yet)
+  //   { phase: "day", date, day, days, state: "fail", error }
+  // onDay(day) runs as each day is ready, so the page can show it before the rest load.
+  // stopped(): true when the user stopped the load; the days left are not loaded.
+  async function loadInconsistencyRange(dates, { now = new Date(), onProgress = null, onDay = null, stopped = () => false } = {}) {
+    const P = globalThis.CompassPeriods;
+    if (!P) throw new Error("The period structure isn't loaded.");
+    onProgress?.({ phase: "students" });
+    const ids = await fetchStudentIds();
+    onProgress?.({ phase: "students", count: ids.length });
+    // One grid request for each week, with the names. A student is kept when the latest week
+    // that has them says they are active.
+    const mondays = [...new Set(dates.map((d) => fmt(mondayOf(d))))].sort();
+    let weeksDone = 0;
+    onProgress?.({ phase: "grid", done: 0, total: mondays.length });
+    const weeks = await Promise.all(mondays.map((m) => fetchWeek(m, ids, GRID_QUERY_NAMES)
+      .then((w) => { onProgress?.({ phase: "grid", done: ++weeksDone, total: mondays.length }); return w; })));
+    const byUid = new Map();
+    for (const week of weeks) {
+      for (const l of week) {
+        const uid = Number(l.userId);
+        const prev = byUid.get(uid);
+        byUid.set(uid, { ...l, days: [...(prev?.days || []), ...(l.days || [])] });
+      }
+    }
+    const lines = [...byUid.values()].filter((l) => l.isActive !== false);
+    const out = { days: [], errors: [], stopped: false };
+    const sorted = [...dates].sort((a, b) => a - b);
+    for (const [n, when] of sorted.entries()) {
+      if (stopped()) { out.stopped = true; break; }
+      const date = fmt(when);
+      const dayEvent = (state, extra = {}) => onProgress?.({ phase: "day", date, day: n + 1, days: sorted.length, state, ...extra });
+      dayEvent("busy");
+      try {
+        const periods = await P.compass(when);
+        if (!periods.length) { dayEvent("skip", { note: periods.note || "No school" }); continue; }
+        const started = periods.map((p) => p.start <= now);
+        if (!started.some(Boolean)) { dayEvent("skip", { note: `School starts at ${periods[0].start.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}` }); continue; }
+        const gridDay = new Map(lines.map((l) => [Number(l.userId), (l.days || []).find((d) => d.date === date)]));
+        const person = (l) => ({ userId: Number(l.userId), name: String(l.reportName || "").trim(), lastName: String(l.lastName || "").trim(), yearLevelString: l.yearLevelString });
+        let students, mode, rolls = 0, stoppedAfter = null;
+        if (isAmPm(periods)) {
+          mode = "halfday";
+          const halves = periods.map((p) => String(p.name).trim().toLowerCase());
+          students = lines.filter((l) => gridDay.get(Number(l.userId))).map((l) => {
+            const day = gridDay.get(Number(l.userId));
+            return { ...person(l), statuses: halves.map((h, i) => {
+              if (!started[i]) return null;
+              const s = halfOf(day, h);
+              return { id: s.id, name: s.name, code: s.code, category: s.category };
+            }) };
+          });
+        } else {
+          mode = "period";
+          // Expected: the students with a grid record that day that isn't "not expected at school".
+          const expected = new Set(lines.filter((l) => {
+            const day = gridDay.get(Number(l.userId));
+            return day && (halfOf(day, "am").category !== "excluded" || halfOf(day, "pm").category !== "excluded");
+          }).map((l) => Number(l.userId)));
+          const res = await loadRollsForDay(periods, started, { expected, stopped, onProgress: (p) => {
+            if (p.step === "classes" && p.total != null) onProgress?.({ phase: "classes", date, done: p.done, total: p.total });
+            else if (p.step === "rolls" && p.total != null) onProgress?.({ phase: "rolls", date, ...p, step: undefined, label: undefined });
+          } });
+          if (stopped()) { out.stopped = true; break; }
+          ({ rolls, stoppedAfter } = res);
+          const line = new Map(lines.map((l) => [Number(l.userId), l]));
+          students = [...res.rows].map(([uid, statuses]) => ({ ...person(line.get(uid) || { userId: uid }), statuses }));
+        }
+        const day = { date, periods, mode, students };
+        out.days.push(day);
+        dayEvent("done", { mode, students: students.length, rolls, stoppedAfter });
+        onDay?.(day);
+      } catch (e) {
+        out.errors.push({ date, error: e.message || String(e) });
+        dayEvent("fail", { error: e.message || String(e) });
+      }
+    }
+    return out;
+  }
+
+  // --- who marked a student's rolls (the Period inconsistencies page) ---------------------
+  // Compass keeps who saved each roll and when (the roll's previousMarkings), not who set one
+  // student's code. So for each period of a student's day this finds the class roll that marked
+  // it (the same call as the Attendance tab of a student's profile) and reads that roll's last save.
+  // Only for the rows the page shows: two requests for each student and day, and the rolls are
+  // shared between students.
+  const markingRolls = new Map(); // instance ID -> promise of the roll (or null)
+  const markingDays = new Map();  // "uid|yyyy/mm/dd" -> promise of the result below
+
+  // The text of Compass's teacher HTML: "<s>(code)</s> code2" -> "code2 (relief for code)".
+  function teacherText(html) {
+    const text = (h) => String(h || "").replace(/<[^>]*>/g, "").replace(/&nbsp;|&#160;/g, " ").replace(/\s+/g, " ").trim();
+    const away = [...String(html || "").matchAll(/<s>([\s\S]*?)<\/s>/gi)].map((m) => text(m[1])).filter(Boolean);
+    const here = text(String(html || "").replace(/<s>[\s\S]*?<\/s>/gi, ""));
+    return away.length && here ? `${here} (relief for ${away.join(", ")})` : here || away.join(", ");
+  }
+
+  // "First Last (username)" -> "First Last".
+  const staffName = (n) => String(n || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
+
+  // The last save of a roll: { by, at: Date, saves } or null when it was never saved.
+  function lastMarking(roll) {
+    const list = (roll?.previousMarkings || []).filter((m) => !m.isReset && parseWhen(m.dt));
+    if (!list.length) return null;
+    const last = list.reduce((a, b) => (parseWhen(b.dt) > parseWhen(a.dt) ? b : a));
+    return { by: staffName(last.n), at: parseWhen(last.dt), saves: list.length };
+  }
+
+  // The class that marked each period: [{ className, teacher, rollMarked, by, at, saves } | null],
+  // one for each of `periods`. date: "yyyy/mm/dd".
+  function loadMarkings(userId, date, periods) {
+    const key = `${userId}|${date}`;
+    if (!markingDays.has(key)) {
+      const promise = (async () => {
+        const [y, m, d] = date.split("/").map(Number);
+        const json = await postJson(`/Services/AttendanceV2.svc/GetDailySummaryForTimeline?_dc=${Date.now()}`,
+          { userId: Number(userId), date: new Date(y, m - 1, d).toISOString(), page: 1, start: 0, limit: 25 }, XRW);
+        if (!Array.isArray(json?.d)) throw new Error("Couldn't read the student's classes from Compass.");
+        const classes = json.d.filter((c) => c.instanceId).map((c) => ({ ...c, s: parseWhen(c.start), f: parseWhen(c.finish) }));
+        return Promise.all(periods.map(async (p) => {
+          // The class on during the period: a marked roll first, then Compass's priority.
+          const on = classes.filter((c) => c.s && c.f && c.s < p.finish && c.f > p.start)
+            .sort((a, b) => Number(!!b.rollMarked) - Number(!!a.rollMarked) || (a.priority ?? 99) - (b.priority ?? 99));
+          const c = on[0];
+          if (!c) return null;
+          if (!markingRolls.has(c.instanceId)) {
+            const roll = fetchRoll(c.instanceId).catch((e) => { markingRolls.delete(c.instanceId); throw e; });
+            markingRolls.set(c.instanceId, roll);
+          }
+          const roll = await markingRolls.get(c.instanceId);
+          return { className: String(c.name || roll?.activityName || "").trim(), teacher: teacherText(c.manager), rollMarked: !!c.rollMarked, ...(lastMarking(roll) || {}) };
+        }));
+      })();
+      promise.catch(() => markingDays.delete(key)); // ask again next time
+      markingDays.set(key, promise);
+    }
+    return markingDays.get(key);
+  }
+
+  // Forgets the cached markings of one date ("yyyy/mm/dd"), or of every date, so they load again.
+  function forgetMarkings(date = null) {
+    for (const k of [...markingDays.keys()]) if (!date || k.endsWith(`|${date}`)) markingDays.delete(k);
+    markingRolls.clear();
+  }
+
+  // The students whose marks on one day mix present and absent. Present: present or excursion.
+  // Absent: an unapproved absence, and an approved one too when absences is "all". Other marks
+  // (not marked, not expected, unknown, none) are skipped: they neither flag nor break a run.
+  //   rule "between": an absence with a present mark before it and after it on the same day.
+  //   rule "any":     at least one present mark and at least one absent mark.
+  // Gives [{ userId, name, yearLevelString, date, periods, mode, statuses, flagged }], newest
+  // day first, then by year group (in school order), then by name: the first name (order "first",
+  // the name as Compass writes it) or the surname (order "last"). flagged: the indexes of the
+  // absences that made the match.
+  function inconsistencies(days, { rule = "between", absences = "unapproved", order = "first" } = {}) {
+    const isPresent = (c) => c === "present" || c === "offsite";
+    const isAbsent = (c) => c === "unapproved" || (absences === "all" && c === "approved");
+    const out = [];
+    for (const day of days) {
+      for (const s of day.students) {
+        const cats = s.statuses.map((x) => x?.category);
+        const presents = cats.map((c, i) => (isPresent(c) ? i : -1)).filter((i) => i >= 0);
+        if (!presents.length) continue;
+        const first = presents[0], last = presents[presents.length - 1];
+        const flagged = cats.map((c, i) => (isAbsent(c) && (rule === "any" || (i > first && i < last)) ? i : -1)).filter((i) => i >= 0);
+        if (flagged.length) out.push({ ...s, date: day.date, periods: day.periods, mode: day.mode, flagged });
+      }
+    }
+    const rank = globalThis.CompassYears.rank;
+    // The surname: Compass's lastName, or else the last word of the name.
+    const surname = (r) => r.lastName || r.name.split(/\s+/).pop() || "";
+    const byName = (a, b) => (order === "last" ? surname(a).localeCompare(surname(b), "en", { sensitivity: "base" }) : 0)
+      || a.name.localeCompare(b.name, "en", { sensitivity: "base" });
+    return out.sort((a, b) => b.date.localeCompare(a.date) || rank(yearOf(a)) - rank(yearOf(b))
+      || yearOf(a).localeCompare(yearOf(b)) || byName(a, b));
   }
 
   // --- trend (the "Attendance Trend" widget) -----------------------------------------------
@@ -690,7 +917,7 @@ globalThis.CompassAttendance = (() => {
     return codes.map((c) => ({ ...c, group: CATEGORY_BY_STATUS_ID[c.id] || null }));
   }
 
-  return { load, loadDay, schoolCodeList, GROUP_BY_COLOUR, loadRoster, loadTrend, trendSessions, enrolment, enrolmentNote, summarise, tally, unmarkedStudents, instanceIds, SESSION_KEY, yearLevels, filterByYears, filterByUsers, CATEGORIES, CATEGORY_BY_STATUS_ID, STATUSES };
+  return { load, loadDay, loadInconsistencyRange, inconsistencies, loadMarkings, forgetMarkings, teacherText, INCONSISTENCY_PAGE, schoolCodeList, GROUP_BY_COLOUR, loadRoster, loadTrend, trendSessions, enrolment, enrolmentNote, summarise, tally, unmarkedStudents, instanceIds, SESSION_KEY, yearLevels, filterByYears, filterByUsers, CATEGORIES, CATEGORY_BY_STATUS_ID, STATUSES };
 })();
 
 if (typeof module !== "undefined") module.exports = globalThis.CompassAttendance;

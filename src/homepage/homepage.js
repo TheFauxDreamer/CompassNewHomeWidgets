@@ -16,7 +16,9 @@
 (() => {
   const path = location.pathname.toLowerCase();
   const isHome = path === "/" || path === "/default.aspx";
-  if (!isHome || window.__compassAttendanceWidget) return;
+  // The Period inconsistencies page (src/pages/inconsistencies.js) is also on the homepage address.
+  const ownPage = new URLSearchParams(location.search).has("ext");
+  if (!isHome || ownPage || window.__compassAttendanceWidget) return;
   window.__compassAttendanceWidget = true;
 
   const EDITING = new URLSearchParams(location.search).get("editing") === "true";

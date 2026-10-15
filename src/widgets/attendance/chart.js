@@ -37,6 +37,8 @@ globalThis.CompassAttendanceUI = (() => {
     .infopanel label.mode { display: flex; gap: 6px; align-items: flex-start; margin: 4px 0; font-size: 12px; cursor: pointer; }
     .infopanel label.mode input { margin: 2px 0 0; flex: none; }
     .infopanel label.mode ~ .intro { margin-top: 12px; }
+    .pagelink { display: block; margin: 10px 0 0; padding: 0; background: none; color: #0E6CD9; font-weight: 600; font-size: 12px; }
+    .pagelink:hover { background: none; text-decoration: underline; }
     .infopanel .auto { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: #FFF4E5; color: #8A4B00; font-size: 11px; font-weight: 600; }
   `;
 
@@ -57,6 +59,7 @@ globalThis.CompassAttendanceUI = (() => {
         </header>
         <div class="yrow" id="yrow"></div>
         <div class="yarea" id="yarea"><div id="body"></div></div>
+        ${mode === "panel" ? '<button class="pagelink" id="inconsistencies" title="Students marked present and absent on the same day. Opens in a new tab.">Period inconsistencies ↗</button>' : ""}
         <div class="infopanel" id="infopanel" hidden></div>
       </div>`;
 
@@ -65,6 +68,7 @@ globalThis.CompassAttendanceUI = (() => {
     globalThis.CompassNames.attach(root);
     if (onClose) $("close").onclick = onClose;
     if (!preview) $("refresh").onclick = () => refresh();
+    if (mode === "panel") $("inconsistencies").onclick = () => window.open(location.origin + globalThis.CompassAttendance.INCONSISTENCY_PAGE, "_blank", "noopener");
 
     // --- (i) code list: covers the chart instead of growing the card ------------
     const infoBtn = $("info"), infoPanel = $("infopanel");

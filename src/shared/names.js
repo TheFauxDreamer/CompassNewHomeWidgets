@@ -6,7 +6,7 @@
 // the title of any extension widget to switch the test names on or off. The browser
 // keeps the choice, and each widget shows a "Test names" chip while it is on.
 globalThis.CompassNames = (() => {
-  const TEST_NAMES = false;
+  const TEST_NAMES = true;
   const KEY = "testNames";
 
   const PEOPLE = [

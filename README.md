@@ -76,6 +76,28 @@ Where the data comes from:
   A circle with a count shows the progress. Rolls that are fully marked are kept until you reload the page, so a refresh opens only the rolls that can still change.
   This uses the class list from Schedule Builder. If your Compass account can't see it, the widget shows an error.
 
+
+### Period inconsistencies
+
+This page lists the students who are marked present and absent on the same day across the rolls, for example present in P1, P2, P4 and P5 but absent in P3.
+To open it, click the extension's icon in the browser toolbar on any Compass page, then click **Period inconsistencies**. The page opens in a new tab. You can bookmark it: the address is `https://<your school>.compass.education/?ext=period-inconsistencies`.
+
+- **Show**: **Absent between presents** lists an absence with a present mark before it and after it on the same day. **Any mix** lists every day with both a present and an absent mark, so it also shows late arrivals and early departures.
+- **Absences**: **Unapproved** counts only unapproved absences (for example Unexplained or Truant). **All** counts approved absences too (for example Notified as Sick).
+- Excursions count as present. Not marked, Not required to attend and periods with no class are skipped.
+- **Days**: the page loads **Today**. Click **Last 2 weeks** to load every school day of the last 14 days, or **Last month** for every school day since this date last month (for example 16 September to 15 October). At a school with periods, **Last month** opens many class rolls, so it can take a long time. Days already loaded are kept, so switching between the ranges doesn't load them again.
+- While the page loads, it shows the overall %, the time so far and an estimate of the time left, the setup steps (student list, attendance grid, class list) and each day: the period whose rolls it is checking, the class rolls checked and the students found. Days with no school show as skipped. Click **Stop** to stop: the days already loaded stay on the page.
+- The chip shows the year groups or the Custom Groups, as on the widgets. The browser keeps the filter and the two settings.
+- Each day (newest first) shows a table of the students, by year group (Kindy first) and then by name (click **First name** or **Surname** under **Sort**; the browser keeps the choice), with one coloured code for each period, with the same colours as the Attendance widget. The flagged absences have a red outline. Put the pointer on a code to see its name. Click a student's name to open their Compass profile.
+- Under each student's name, the page shows who last saved the roll for each flagged period and when, for example "P3 U by Cid Highwind at 11:42am (Seventh Heaven)". Put the pointer on any code to see the class, the teacher (and a relief teacher), who last saved the roll and when, and how many times it was saved.
+  Compass records who saved a roll, not who changed one student's code, so a code changed later by the office still shows the roll's last save. The page checks this only for the students it shows (two requests for each student and day).
+- The page shows student and staff names, because the staff member must follow up each student.
+
+Where the data comes from:
+
+- With an AM/PM period structure, the page uses the Compass half-day grid, so it loads quickly. With only two rolls a day, no absence can be between two presents: use **Any mix**.
+- With more periods, the page opens class rolls. Each roll gives the whole day of its students, so the page opens one period's rolls first and stops when every student is found. **Last 2 weeks** still opens many rolls, so it can take a few minutes in a large school.
+
 ### Attendance Trend
 
 This widget shows the percentage present for each roll session (AM and PM) of this week and last week, as one line, oldest to newest.
@@ -260,6 +282,7 @@ Use ` | ` because many task names already use " - " as normal punctuation. To ad
 
 Click the extension icon in the browser toolbar to open the Attendance chart on any Compass page.
 Click the icon again to close the panel.
+Click **Period inconsistencies** at the bottom of the panel to open the Period inconsistencies page in a new tab.
 
 ## Year-group filter
 
@@ -384,6 +407,7 @@ Set `TEST_NAMES` back to `false` before you release the extension.
 | `src/homepage/homepage.js` | Adds the widgets to the Compass homepage and to the layout editor. Moves and hides the widgets. Shows the welcome card while no widget is on the homepage. |
 | `src/homepage/calendar-dots.js` | Adds the event dots to the Term Calendar widget. |
 | `src/homepage/countdown-colours.js` | Adds the colour choice to the Compass Countdown widgets. |
+| `src/pages/inconsistencies.js` | The Period inconsistencies page. It shows only at the page's own address (`/?ext=period-inconsistencies`). |
 | `src/homepage/task-extras.js` | Adds the full names on hover, the sub-tasks and the due-date colours to the Compass task list. |
 | `src/toolbar/background.js`, `src/toolbar/panel.js` | Open the Attendance chart from the toolbar icon. `background.js` also gets the BOM files. |
 | `icons/` | The extension icons. |
@@ -399,7 +423,8 @@ The scripts share global objects (for example `CompassYears` and `CompassTheme`)
 
 1. `src/shared/`: other scripts use these files.
 2. `src/widgets/`: `data.js` before `chart.js`, then the other widgets.
-3. `src/homepage/`: these files add the widgets to the page, so they load last.
+3. `src/homepage/`: these files add the widgets to the page.
+4. `src/pages/`: the extension's own pages, last.
 
 The toolbar panel loads its own list of scripts. This list is in `src/toolbar/background.js`.
 
