@@ -10,6 +10,7 @@ Use it to find which widget depends on which request, and to find data for new w
 - Most `.svc` responses are `{ "d": … }`. A list is `d` (an array), or `d.data` with `d.total`. Paged calls take `page`, `start` and `limit`.
 - `?sessionstate=readonly` is on most read calls, as Compass's own pages send it.
 - When Compass sends a redirect, 401 or 403, the login has expired. Each widget shows "Check you're still logged in".
+- In the attendance grid, `amStatus`/`pmStatus` is a colour: `GREEN` (present), `ORANGE` (an absence with a reason, for example Notified as Sick, but also Unauthorised Vacation) or `RED` (unexplained). It is `null` for Not Marked. The colour is not the same as approved/unapproved, so the extension uses it only for codes that `STATUSES` doesn't list.
 - Field names are short (for example `n` = name, `s` = start, `f` = finish). The tables give the meaning.
 - The only request to a service that isn't Compass is the Weather widget's request to the Bureau of Meteorology (see README.md).
 
@@ -30,7 +31,8 @@ All examples in this file use made-up names.
 
 | Call | Body | What we use | Used by |
 | --- | --- | --- | --- |
-| `/graphql/`, operation `GetHalfDaySummaryGridLinesByWeekStart` | `{ weekStart: "2026/10/12", gridGroupId: "", gridGroupType: "UNIFIEDGROUP", unifiedUserIds: [ids] }` | One line for each student: `userId`, `isActive`, `yearLevelString`, `formGroup` (class), `houseGroup` (faction), and `days[]` with `date` ("yyyy/mm/dd") and for AM and PM: `…ExtendedStatusIdRaw`, `…StatusName`, `…StatusExportIdentifier`, `…StatusPeriodCalcNotMarked`. | Attendance, Attendance Today, Enrolment, toolbar panel (`attendance/data.js`) |
+| `/graphql/`, operation `GetHalfDaySummaryGridLinesByWeekStart` | `{ weekStart: "2026/10/12", gridGroupId: "", gridGroupType: "UNIFIEDGROUP", unifiedUserIds: [ids] }` | One line for each student: `userId`, `isActive`, `yearLevelString`, `formGroup` (class), `houseGroup` (faction), and `days[]` with `date` ("yyyy/mm/dd") and for AM and PM: `…ExtendedStatusIdRaw`, `…StatusName`, `…StatusExportIdentifier`, `…StatusPeriodCalcNotMarked`, `amStatus`/`pmStatus` (the colour, for codes not in `STATUSES`). | Attendance, Attendance Today, Attendance Trend (this week and last week), Enrolment, toolbar panel (`attendance/data.js`) |
+| `/graphql/`, operation `GetExtendedStatuses` | none | `extendedStatuses[]`: `id` (an encoded ID), `extendedStatusIdRaw` (the number, as in the grid), `schoolSystemExportIdentifier` (the code, for example "U"), `name` (the school's name for it). Also `attendanceGridDisplayMode`, `attendanceGridOrdinal` (null at the school we tested). No group. | The (i) panel of the Attendance widget, and the code names in the Codes view (`attendance/data.js`) |
 | `Attendance.svc/GetAllUnmarkedRolls` | `{ unifiedUserIds: null, page, start, limit: 200, filter: "[{property:'start',value:'…T00:00:00',type:'>='},{property:'finish',…,type:'<='}]" }` | `d.data[]`: `id` (roll instance ID), `s`/`f` (start and finish, ISO), `n` (class), `p` (period), `l` (room), `m` (teacher HTML, see below), `yl` (year level). `d.total`. | Unmarked Rolls; Attendance and Attendance Today (to find the students in unmarked rolls) |
 | `Attendance.svc/GetRollPackage` | `{ instanceId: "<roll instance ID>" }` | `d.data.start`, `d.data.rollData[]`: `uid`, `userTimeLinePeriods[]` (every period of the student's day: `start`, `finish`, `name`, `status`, `statusName`, `exportId`, `extendedStatus.id`, `extendedStatus.periodCalc_NotMarked`). | Attendance and Attendance Today (`attendance/data.js`) |
 | `Attendance.svc/GetArrivalsAndDepartures` | `{ fromFilter: null, toFilter: null, typeFilter: null, filter: "[]", page, start, limit }` | `d.data[]`: `id`, `uid`, `n` (student), `ct` (1 = arrival, 2 = departure), `t` (time), `c` (reason), `minutesLate`, `formGroup`, `yearLevelId`, `userCreatorName`. | Arrivals & Departures, and the On site line in Attendance Today |
@@ -98,11 +100,12 @@ These calls were seen in Compass pages (HAR files) or are in code that is switch
 
 | Operation | Variables | What it gives |
 | --- | --- | --- |
-| `GetHalfDaySummaryGridLinesByWeekStart` (more fields) | as above | Fields we don't request yet: `displayCode`, `reportName`, `lastName` (names: use only when a widget needs them), `campus`, `attendancePercentage` (each student's percentage), `timeAmountArrivedLateAm`/`Pm` (minutes late), `amStatus`/`pmStatus` (general status), `userFlags[]` (`description`, `imageUrl`), `chroniclePinnedCount`, `displayFormatName`. |
+| `GetHalfDaySummaryGridLinesByWeekStart` (more fields) | as above | Fields we don't request yet: `displayCode`, `reportName`, `lastName` (names: use only when a widget needs them), `campus`, `attendancePercentage` (each student's percentage), `timeAmountArrivedLateAm`/`Pm` (minutes late), `amExtendedStatusId`/`pmExtendedStatusId` (an encoded ID; we use the `…Raw` number instead), `userFlags[]` (`description`, `imageUrl`), `chroniclePinnedCount`, `displayFormatName`. |
 | `GetHistoricalHalfDaySummaryGridLinesByWeekStart` | `{ weekStart }` | The same grid for past weeks (students who have left). For an attendance trend or a watchlist. |
-| `GetCurrentAttendanceWeekFilterYearMonthOptions` | `{ gridGroupType, gridGroupId, unifiedUserIds }` | `month`, `year`, `weekStarts[]`: the weeks that have attendance data. |
-| `GetExtendedStatuses`, `GetDisplayModeCurrentExtendedStatuses`, `GetExtendedStatusOptionsFor(activityType)` | — | The school's attendance codes (`name`, `systemCode`, `description`). Could fill the `STATUSES` list in `data.js` automatically. |
-| `GetReferenceData` | — | The school's reference lists (seen on the attendance page). |
+| `GetCurrentAttendanceWeekFilterYearMonthOptions` | `{ gridGroupType: "UNIFIEDGROUP", gridGroupId: "", unifiedUserIds: [ids] }` | `currentAttendanceWeekFilterYearMonthOptions[]`: `month`, `year`, `weekStarts[]` ("yyyy/mm/dd"): the weeks of the year that have attendance data. |
+| `GetDisplayModeCurrentExtendedStatuses` | none | `displayModeCurrentExtendedStatuses[]`, the same fields as `GetExtendedStatuses` (which we use). Empty at the school we tested. |
+| `GetExtendedStatusOptionsFor(activityType)` | `{ activityType }` | `extendedStatusOptionsFor[]`: `extendedStatusId.entityId`, `name`, `systemCode`, `description`. Seen as query text only. |
+| `GetReferenceData` | none | `currentOrganisation`: `id`, `systemType`, `schoolLogo`, `schoolSystemTypeRefData[]` (`id`, `type`, `countryCode`, `isAustralian`, `isCanadian`, `isEnglish`, `isIrish`, `isIndonesian`). |
 | `GetGroupActivityTrackingCases`, `GetGroupActivityTrackingCaseDetail(caseId)` | `{ activityId, status, includeExcludedActivities }` | Attendance tracking cases: student, class, missed count, status, attempts. For a "students at risk" widget. |
 | `GetInstancesOutsideOfBounds` | `{ activityId, startTime, finishTime }` | Class instances outside the period structure. |
 

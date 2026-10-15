@@ -40,10 +40,17 @@
       mount: (host, preview) => globalThis.CompassDayAttendanceUI.mount(host, { preview }),
     },
     {
+      id: "compass-trend-widget",
+      title: "Attendance trend (extension)",
+      posKey: "trendWidgetPosition",
+      after: "compass-day-attendance-widget",
+      mount: (host, preview) => globalThis.CompassTrendUI.mount(host, { preview }),
+    },
+    {
       id: "compass-unmarked-widget",
       title: "Unmarked rolls (extension)",
       posKey: "unmarkedWidgetPosition",
-      after: "compass-day-attendance-widget",
+      after: "compass-trend-widget",
       mount: (host, preview) => globalThis.CompassUnmarkedUI.mount(host, { preview }),
     },
     {

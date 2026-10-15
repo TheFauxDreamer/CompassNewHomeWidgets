@@ -66,6 +66,8 @@ globalThis.CompassAttendance = (() => {
       houseGroup
       days {
         date
+        amStatus
+        pmStatus
         amStatusName
         amExtendedStatusIdRaw
         amStatusExportIdentifier
@@ -124,20 +126,59 @@ globalThis.CompassAttendance = (() => {
     return json?.data?.currentOrganisation?.halfDaySummaryGridLinesByWeekStart || [];
   }
 
+  // --- the school's codes from Compass ---------------------------------------------
+  // The same request as the Compass attendance page. Gives [{ id, code, name }], with the
+  // school's own names. STATUSES above stays the policy for the groups; this list gives the
+  // names and shows codes that STATUSES doesn't have. Fetched one time for each page.
+  const CODES_QUERY = `query GetExtendedStatuses {
+  currentOrganisation {
+    extendedStatuses {
+      id
+      extendedStatusIdRaw
+      schoolSystemExportIdentifier
+      name
+    }
+  }
+}`;
+  let codesPromise = null;
+  let schoolCodes = null; // Map(id -> { id, code, name }) once loaded
+  function fetchCodes() {
+    codesPromise ||= postJson("/graphql/", { operationName: "GetExtendedStatuses", variables: {}, query: CODES_QUERY })
+      .then((json) => {
+        const list = json?.data?.currentOrganisation?.extendedStatuses;
+        if (!Array.isArray(list)) throw new Error("Couldn't read the attendance codes from Compass.");
+        const codes = list.map((c) => ({ id: Number(c.extendedStatusIdRaw), code: String(c.schoolSystemExportIdentifier ?? ""), name: String(c.name || "").trim() }))
+          .filter((c) => Number.isFinite(c.id));
+        schoolCodes = new Map(codes.map((c) => [c.id, c]));
+        return codes;
+      })
+      .catch((e) => { codesPromise = null; throw e; });
+    return codesPromise;
+  }
+
+  // A code that STATUSES doesn't list gets a group from the colour that the grid sends with
+  // each mark: GREEN present, RED unexplained (unapproved), ORANGE an absence with a reason.
+  // ORANGE is only a guess: Compass also shows Unauthorised Vacation as ORANGE. So these
+  // codes are "auto" and the chart says so (see tally's autoCodes).
+  const GROUP_BY_COLOUR = { GREEN: "present", RED: "unapproved", ORANGE: "approved" };
+
   // --- pure logic (no network) -----------------------------------------------
-  function categorise(statusId, notMarkedFlag) {
+  // colour: the grid's general status (GREEN/ORANGE/RED), for a code that STATUSES doesn't list.
+  function categorise(statusId, notMarkedFlag, colour = null) {
     if (notMarkedFlag || statusId == null) return "unmarked";
-    return CATEGORY_BY_STATUS_ID[statusId] || "unknown";
+    return CATEGORY_BY_STATUS_ID[statusId] || GROUP_BY_COLOUR[String(colour || "").toUpperCase()] || "unknown";
   }
 
   // half: "am", "pm", or "period" (the rows that loadPeriod makes).
   function halfOf(day, half) {
     const p = half === "am" || half === "period" ? half : "pm";
+    const id = day[`${p}ExtendedStatusIdRaw`] == null ? null : Number(day[`${p}ExtendedStatusIdRaw`]);
     return {
-      id: day[`${p}ExtendedStatusIdRaw`],
+      id,
       name: day[`${p}StatusName`],
       code: day[`${p}StatusExportIdentifier`],
-      category: categorise(day[`${p}ExtendedStatusIdRaw`], day[`${p}StatusPeriodCalcNotMarked`]),
+      category: categorise(id, day[`${p}StatusPeriodCalcNotMarked`], day[`${p}Status`]),
+      auto: id != null && !(id in CATEGORY_BY_STATUS_ID) && !day[`${p}StatusPeriodCalcNotMarked`],
     };
   }
 
@@ -154,6 +195,7 @@ globalThis.CompassAttendance = (() => {
   function tally(students, date, half, notMarked = null) {
     const counts = { present: 0, offsite: 0, approved: 0, unapproved: 0, unmarked: 0, excluded: 0, unknown: 0 };
     const unknownCodes = new Map();
+    const autoCodes = new Map(); // id|group -> { label, group, count }: codes grouped by the grid's colour
     const byCode = new Map(); // "code|name" -> { code, name, group, count } for the per-code chart
     for (const s of students) {
       const day = (s.days || []).find((d) => d.date === date);
@@ -162,7 +204,18 @@ globalThis.CompassAttendance = (() => {
       if (notMarked?.has(Number(s.userId)) && h.category !== "excluded") h.category = "unmarked";
       counts[h.category]++;
       if (h.category !== "unknown" && h.category !== "excluded") {
-        const [, code, name, group] = h.category === "unmarked" ? STATUS_BY_ID[470] : STATUS_BY_ID[h.id];
+        const id = h.category === "unmarked" ? NOT_MARKED_ID : h.id;
+        const known = STATUS_BY_ID[id];
+        // The school's own name from Compass when it is loaded, else the name in STATUSES.
+        const code = schoolCodes?.get(id)?.code ?? known?.[1] ?? h.code ?? "?";
+        const name = schoolCodes?.get(id)?.name || known?.[2] || h.name || `Code ${id}`;
+        const group = h.category;
+        if (h.auto && h.category !== "unmarked") {
+          const k = `${id}|${group}`;
+          const a = autoCodes.get(k) || { label: `${code} ${name}`.trim(), group, count: 0 };
+          a.count++;
+          autoCodes.set(k, a);
+        }
         const key = code + "|" + name;
         const entry = byCode.get(key) || { code, name, group, count: 0 };
         entry.count++;
@@ -175,7 +228,28 @@ globalThis.CompassAttendance = (() => {
     }
     const total = counts.present + counts.offsite + counts.approved + counts.unapproved + counts.unmarked;
     const marked = total - counts.unmarked;
-    return { date, half, counts, total, marked, byCode: [...byCode.values()], unknownCodes: [...unknownCodes.entries()] };
+    return { date, half, counts, total, marked, byCode: [...byCode.values()], unknownCodes: [...unknownCodes.entries()],
+      autoCodes: [...autoCodes.values()] };
+  }
+
+  // --- counted vs enrolled ---------------------------------------------------------
+  // enrolled: the active students in the filter. counts: { total, excluded, unknown } of one
+  // session (from tally, or Attendance Today's count). Gives where the other students are:
+  //   notExpected: a code that means "not expected at school" (Q, school closure, unscheduled)
+  //   unmapped:    a code that the extension doesn't know
+  //   noRecord:    no mark at all for the session (for example, kindy on their days off)
+  function enrolment(enrolled, counts) {
+    const notExpected = counts.excluded || 0, unmapped = counts.unknown || 0;
+    return { enrolled, counted: counts.total, notExpected, unmapped, noRecord: Math.max(0, enrolled - counts.total - notExpected - unmapped) };
+  }
+
+  // The hover text that explains the gap, or "" when every enrolled student is counted.
+  function enrolmentNote(e) {
+    const parts = [];
+    if (e.notExpected) parts.push(`${e.notExpected} not expected at school (not required to attend, school closure or unscheduled)`);
+    if (e.noRecord) parts.push(`${e.noRecord} with no record for this session (for example, kindy on their days off)`);
+    if (e.unmapped) parts.push(`${e.unmapped} with a code the extension doesn't know`);
+    return parts.length ? `${e.counted} of ${e.enrolled} enrolled students are counted. Not counted: ${parts.join(" · ")}.` : "";
   }
 
   // Picks the session using the WHOLE school (so the PM threshold still works when
@@ -418,12 +492,15 @@ globalThis.CompassAttendance = (() => {
       days: [{ date, periodExtendedStatusIdRaw: st.id, periodStatusName: st.name,
         periodStatusExportIdentifier: st.code, periodStatusPeriodCalcNotMarked: st.notMarked }],
     }));
-    return { date, half: "period", periodName: period.name, rolls, students };
+    // roster: every active student, for the enrolled count (the rolls give only the students
+    // who have a class in this period).
+    return { date, half: "period", periodName: period.name, rolls, students, roster: lines };
   }
 
   // mode: "halfday" (AM/PM, the default) or "period".
   // onProgress({ done, total, label }) runs while class rolls load.
   async function load(now = new Date(), { mode = "halfday", onProgress = null } = {}) {
+    fetchCodes().catch(() => {}); // the names only; the chart works without them
     const ids = await fetchStudentIds();
     const thisMonday = mondayOf(now);
 
@@ -557,7 +634,42 @@ globalThis.CompassAttendance = (() => {
       userId: uid, yearLevelString: year.get(uid) || "",
       statuses: row.map((s) => s && { id: s.id, name: s.name, code: s.code, category: categorise(s.id, s.notMarked) }),
     }));
-    return { date, periods, students, mode: "period", rolls };
+    const roster = lines.map((l) => ({ userId: Number(l.userId), yearLevelString: l.yearLevelString }));
+    return { date, periods, students, roster, mode: "period", rolls };
+  }
+
+  // --- trend (the "Attendance Trend" widget) -----------------------------------------------
+  // The roll sessions to show, oldest first: [{ date, half }]. The choice uses the whole school
+  // (as summarise does), so a filter changes the numbers but not the sessions:
+  //   - a past session with at least one mark;
+  //   - today's AM once it has a mark; today's PM once more than PM_SWITCH_THRESHOLD students
+  //     have a PM mark (a few pre-entered PM codes don't count).
+  function trendSessions(lines, now = new Date()) {
+    const today = fmt(now);
+    const dates = new Set();
+    for (const s of lines) for (const d of s.days || []) if (d.date && d.date <= today) dates.add(d.date);
+    const out = [];
+    for (const date of [...dates].sort()) {
+      for (const half of ["am", "pm"]) {
+        const t = tally(lines, date, half);
+        const keep = date < today || half === "am" ? t.marked > 0 : t.marked > PM_SWITCH_THRESHOLD;
+        if (keep) out.push({ date, half });
+      }
+    }
+    return out;
+  }
+
+  // This week's and last week's grid, merged into one line for each active student.
+  async function loadTrend(now = new Date()) {
+    const ids = await fetchStudentIds();
+    const thisMonday = mondayOf(now);
+    const lastMonday = new Date(thisMonday.getFullYear(), thisMonday.getMonth(), thisMonday.getDate() - 7);
+    const [cur, prev] = await Promise.all([fetchWeek(fmt(thisMonday), ids), fetchWeek(fmt(lastMonday), ids)]);
+    const byUid = new Map();
+    for (const l of cur) if (l.isActive !== false) byUid.set(Number(l.userId), { ...l, days: [...(l.days || [])] });
+    for (const l of prev) byUid.get(Number(l.userId))?.days.push(...(l.days || []));
+    const students = [...byUid.values()];
+    return { students, sessions: trendSessions(students, now), now };
   }
 
   // --- enrolment (the "Enrolment" widget) ------------------------------------------------
@@ -571,7 +683,14 @@ globalThis.CompassAttendance = (() => {
     }));
   }
 
-  return { load, loadDay, loadRoster, summarise, tally, unmarkedStudents, instanceIds, SESSION_KEY, yearLevels, filterByYears, filterByUsers, CATEGORIES, CATEGORY_BY_STATUS_ID, STATUSES };
+  // The school's codes ([{ id, code, name, group, auto }]) for the (i) panel. group is the
+  // group in STATUSES, or null for a code that STATUSES doesn't list.
+  async function schoolCodeList() {
+    const codes = await fetchCodes();
+    return codes.map((c) => ({ ...c, group: CATEGORY_BY_STATUS_ID[c.id] || null }));
+  }
+
+  return { load, loadDay, schoolCodeList, GROUP_BY_COLOUR, loadRoster, loadTrend, trendSessions, enrolment, enrolmentNote, summarise, tally, unmarkedStudents, instanceIds, SESSION_KEY, yearLevels, filterByYears, filterByUsers, CATEGORIES, CATEGORY_BY_STATUS_ID, STATUSES };
 })();
 
 if (typeof module !== "undefined") module.exports = globalThis.CompassAttendance;

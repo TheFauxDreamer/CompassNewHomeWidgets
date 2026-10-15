@@ -181,14 +181,15 @@ globalThis.CompassDayAttendanceUI = (() => {
     }
 
     // The students after the filter, or null while a group's members load (then draw() runs again).
-    function filtered() {
+    // list: day.students (default), or day.roster (every active student, for the enrolled count).
+    function filtered(list = day?.students) {
       if (!day) return [];
       if (G.isGroups(years)) {
         let members;
         try { members = groupMembers.get(years); } catch (e) { error = `Couldn't load the group: ${e.message || e}`; return []; }
-        return members ? A.filterByUsers(day.students, members) : null;
+        return members ? A.filterByUsers(list, members) : null;
       }
-      return Array.isArray(years) ? A.filterByYears(day.students, years) : day.students;
+      return Array.isArray(years) ? A.filterByYears(list, years) : list;
     }
 
     // --- drawing -------------------------------------------------------------------------------
@@ -301,15 +302,18 @@ globalThis.CompassDayAttendanceUI = (() => {
       }
     }
 
-    // Counts of each category for one period: { present: n, …, total }.
+    // Counts of each category for one period: { present: n, …, total, excluded, unknown }.
+    // total counts only the chart's categories (not "excluded" or "unknown").
     function countsFor(students, i) {
       const c = Object.fromEntries(CATS.map((k) => [k.key, 0]));
-      let total = 0;
+      let total = 0, excluded = 0, unknown = 0;
       for (const s of students) {
         const cat = s.statuses[i]?.category;
         if (cat in c) { c[cat]++; total++; }
+        else if (cat === "excluded") excluded++;
+        else if (cat === "unknown") unknown++;
       }
-      return { ...c, total };
+      return { ...c, total, excluded, unknown };
     }
 
     function draw() {
@@ -362,7 +366,7 @@ globalThis.CompassDayAttendanceUI = (() => {
         legend.append(item);
       };
 
-      let summary;
+      let summary, summaryNote = "";
       if (view === "periods") {
         // One stacked column for each period, across its start–finish time; 2px gaps.
         periods.forEach((p, i) => {
@@ -397,7 +401,10 @@ globalThis.CompassDayAttendanceUI = (() => {
         if (latest >= 0) {
           const c = countsFor(students, latest);
           for (const k of CATS) legendItem(k.color, k.label, c[k.key], { hatch: k.hatch });
-          summary = [{ b: periods[latest].name }, `${c.total} students`, `${pct(c.present, c.total)}% present`];
+          const enrolled = (day.roster ? filtered(day.roster) || [] : students).length;
+          const enrol = A.enrolment(enrolled, c);
+          summary = [{ b: periods[latest].name }, enrolled > c.total ? `${c.total} of ${enrolled} enrolled` : `${c.total} students`, `${pct(c.present, c.total)}% present`];
+          summaryNote = A.enrolmentNote(enrol);
         } else {
           for (const k of CATS) legendItem(k.color, k.label, null, { hatch: k.hatch });
           summary = [`School starts at ${fmtTime(periods[0].start)}`];
@@ -440,7 +447,9 @@ globalThis.CompassDayAttendanceUI = (() => {
           pts.forEach((p, i) => {
             let tip = `${fmtTime(p.time)} · ${p.count} of ${total} on site (${pct(p.count, total)}%)`;
             for (const g of byYear) tip += `\n${g.year}: ${g.pts[i]?.count ?? 0} of ${g.total} (${pct(g.pts[i]?.count ?? 0, g.total)}%)`;
-            svg.append(svgEl("rect", { x: x(p.time.getTime()) - step / 2, y: m.t, width: step, height: H - m.t - m.b, class: "hit" }, tip));
+            // Kept inside the plot, so the first and last columns don't stick out of the card.
+            const x0 = Math.max(m.l, x(p.time.getTime()) - step / 2), x1 = Math.min(W - m.r, x(p.time.getTime()) + step / 2);
+            svg.append(svgEl("rect", { x: x0, y: m.t, width: Math.max(0, x1 - x0), height: H - m.t - m.b, class: "hit" }, tip));
           });
         }
         const nowCount = pts.length ? pts[pts.length - 1].count : 0;
@@ -489,7 +498,7 @@ globalThis.CompassDayAttendanceUI = (() => {
         if (typeof part === "string") s.append(part);
         else s.append(el("b", null, part.b), part.after || "");
       });
-      s.title = s.textContent;
+      s.title = s.textContent + (summaryNote ? `\n${summaryNote}` : "");
     }
 
     // The whole hours between the first start and the last finish.

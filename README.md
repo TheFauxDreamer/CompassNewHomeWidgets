@@ -14,7 +14,11 @@ This widget shows a pie chart of the attendance for the most recent roll session
 - The chart shows five groups: Present, Excursion, Approved absence, Unapproved absence and Not marked.
 - The colours are safe for users with colour blindness. The Unapproved absence group also has stripes.
 - Click **Groups** to show one slice for each group. Click **Codes** to show one slice for each Compass attendance code.
-- Click the **(i)** button to see the Compass codes in each group.
+- Click the **(i)** button to see your school's Compass codes in each group.
+- The line above the chart shows the counted students and the enrolled students, for example "AM roll · 475 of 530 enrolled".
+  The enrolled students are the active students in the selected year groups or Custom Groups.
+  Put the pointer on the line to see why some students are not counted: a code that means they are not expected at school (for example, Q), no record for the session (for example, kindy on their days off), or a code that the extension doesn't know.
+  The chart and its percentages show the counted students.
 - The chip below the title shows the year groups in the chart. Click the chip to change the year groups.
 - The widget refreshes every 15 minutes. Click the refresh button to refresh it immediately.
 
@@ -52,6 +56,7 @@ Click **Periods** or **On site** to change the graph. The browser keeps your cho
 - **Periods** shows one bar for each period of the Compass period structure (AM and PM in many primary schools).
   Each bar shows Present, Excursion, Approved absence, Unapproved absence and Not marked, with the same colours as the Attendance widget.
   The white number in a bar is the percentage present. Periods that haven't started show as dashed outlines.
+  The line above the graph shows the latest period, the counted and enrolled students (for example "AM · 475 of 530 enrolled · 92% present"). Put the pointer on it to see why some students are not counted.
 - **On site** shows the percentage of students at school through the day. The line starts from the first roll,
   goes up when a late student arrives and goes down when a student leaves early (from Arrivals & Departures). Students on an excursion are not on site.
   Click **By year** (at the start of the legend) to also show one coloured line for each year group. Each year group's line is the percentage of that year group on site.
@@ -68,6 +73,18 @@ Where the data comes from:
 - With more periods, the widget opens the class roll of every class for each period that has started, so it loads more slowly.
   A circle with a count shows the progress. Rolls that are fully marked are kept until you reload the page, so a refresh opens only the rolls that can still change.
   This uses the class list from Schedule Builder. If your Compass account can't see it, the widget shows an error.
+
+### Attendance Trend
+
+This widget shows the percentage present for each roll session (AM and PM) of this week and last week, as one line, oldest to newest.
+
+- Each point is one session. Put the pointer on a point to see the session, the percentage and the numbers, for example "Tue 14 Oct · AM · 92% present (440 of 478)".
+- The line above the graph shows the latest session and the change from the session before, for example "▲2 pts from AM".
+- Under the graph, each day shows its weekday and date. A dashed line shows where a new week starts.
+- The graph shows a session after it has marks. Today's PM shows when more than 100 students have a PM mark, as in the Attendance widget.
+- The percentage is the Present group of the counted students, the same as the Attendance Today bars.
+- The chip below the title shows the year groups or the Custom Groups. Click the chip to change the selection.
+- The widget refreshes every hour. Click the refresh button to refresh it immediately.
 
 ### Unmarked Rolls
 
@@ -295,7 +312,13 @@ The `STATUSES` list in `src/widgets/attendance/data.js` puts each Compass attend
 To change the groups for your school policy, edit this list.
 The **(i)** panel shows the changes automatically.
 
-If Compass sends a code that is not in the list, the Attendance widget shows a note with the code.
+The extension also gets your school's list of codes from Compass (the same list as the Compass attendance page). The **(i)** panel shows the codes with your school's names.
+A code that is not in `STATUSES` shows under **Other codes** in the panel, with an **auto** tag.
+
+When Compass sends a mark with a code that is not in `STATUSES`, the chart groups it by the colour that Compass gives the mark:
+green is Present, red is Unapproved absence and orange is Approved absence. The chart shows a note with the code, so you can check the group.
+Orange is only a guess: Compass also shows Unauthorised Vacation as orange. To choose the group yourself, add the code to `STATUSES`.
+If the mark has no colour, the code is left out and the note says so.
 
 ## Hide the test date box
 
@@ -339,6 +362,7 @@ Set `TEST_NAMES` back to `false` before you release the extension.
 | `src/widgets/unmarked.js` | The Unmarked Rolls widget. |
 | `src/widgets/movements.js` | The Arrivals & Departures widget. |
 | `src/widgets/dayattendance.js` | The Attendance Today widget (period bars and the on-site line). |
+| `src/widgets/trend.js` | The Attendance Trend widget (the % present of each session of this week and last week). |
 | `src/widgets/chronicle.js` | The Recent Chronicle widget. |
 | `src/widgets/relief.js` | The Relief widget. |
 | `src/widgets/period.js` | The Current Period widget, with the timetable share code. |
@@ -352,6 +376,8 @@ Set `TEST_NAMES` back to `false` before you release the extension.
 | `src/toolbar/background.js`, `src/toolbar/panel.js` | Open the Attendance chart from the toolbar icon. `background.js` also gets the BOM files. |
 | `icons/` | The extension icons. |
 | `docs/PLANNED_WIDGETS.md` | Ideas for new widgets. |
+| `tests/` | The automated tests (see "Run the tests"). `tests/load.js` loads the scripts into Node. |
+| `package.json` | Only the `npm test` command. Chrome ignores this file. |
 | `docs/COMPASS_CALLS.md` | Every Compass request that each widget makes, and the requests we know but don't use yet. |
 
 ### Load order
@@ -375,4 +401,17 @@ The toolbar panel loads its own list of scripts. This list is in `src/toolbar/ba
 2. Add the script to `content_scripts` in `manifest.json`, after the other widgets and before `src/homepage/homepage.js`.
 3. Add the widget to the `CARDS` list in `src/homepage/homepage.js`.
 4. If the widget uses year groups, use `CompassYears.filter` from `src/shared/years.js`.
-5. Add the widget to this README, and remove it from `docs/PLANNED_WIDGETS.md`.
+5. Put the logic that doesn't need the page (counting, sorting, parsing Compass data) in functions that the widget returns, and add tests for them in `tests/` (see "Run the tests").
+6. Add each Compass call to `docs/COMPASS_CALLS.md`.
+7. Add the widget to this README, and remove it from `docs/PLANNED_WIDGETS.md`.
+
+## Run the tests
+
+The tests check the logic of the widgets with made-up data: the attendance counts, the session choice, the unmarked rolls, the enrolment and trend counts, the timetable code, the period helpers and the on-site line.
+They need Node.js 20 or later, and nothing else.
+
+1. Open a terminal in the repository folder.
+2. Run `npm test` (or `node --test "tests/*.test.js"`).
+
+Each test shows `ok` or `not ok`. The tests use Perth time and a stub of Compass, so they give the same result on every computer and never contact Compass.
+Run the tests before you release the extension.

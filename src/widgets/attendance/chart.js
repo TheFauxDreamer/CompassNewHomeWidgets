@@ -37,12 +37,13 @@ globalThis.CompassAttendanceUI = (() => {
     .infopanel label.mode { display: flex; gap: 6px; align-items: flex-start; margin: 4px 0; font-size: 12px; cursor: pointer; }
     .infopanel label.mode input { margin: 2px 0 0; flex: none; }
     .infopanel label.mode ~ .intro { margin-top: 12px; }
+    .infopanel .auto { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: #FFF4E5; color: #8A4B00; font-size: 11px; font-weight: 600; }
   `;
 
   const { CSS, ICONS } = globalThis.CompassTheme;
 
   function mountSnapshot(host, { mode = "panel", onClose, preview = false } = {}) {
-    const { load, tally, yearLevels, filterByYears, filterByUsers, CATEGORIES, SESSION_KEY } = globalThis.CompassAttendance;
+    const { load, tally, yearLevels, filterByYears, filterByUsers, enrolment, enrolmentNote, CATEGORIES, SESSION_KEY } = globalThis.CompassAttendance;
     const G = globalThis.CompassGroups;
     const root = host.shadowRoot || host.attachShadow({ mode: "open" });
     root.innerHTML = `
@@ -67,6 +68,9 @@ globalThis.CompassAttendanceUI = (() => {
 
     // --- (i) code list: covers the chart instead of growing the card ------------
     const infoBtn = $("info"), infoPanel = $("infopanel");
+    // The school's codes from Compass ([{ id, code, name, group }]), or null until they load
+    // (or when Compass doesn't give them): then the panel shows the STATUSES list.
+    let schoolCodes = null;
     function buildInfo() {
       const { STATUSES } = globalThis.CompassAttendance;
       const groups = [...CATEGORIES, { key: "excluded", label: "Not counted (not expected at school)", color: "#fff" }];
@@ -88,11 +92,19 @@ globalThis.CompassAttendanceUI = (() => {
       }
       const intro = document.createElement("p");
       intro.className = "intro";
-      intro.textContent = "Compass codes in each group of the chart:";
+      intro.textContent = schoolCodes
+        ? "Your school's Compass codes in each group of the chart:"
+        : "Compass codes in each group of the chart:";
       infoPanel.append(intro);
-      for (const g of groups) {
+      // [code, name, group, auto]. A code that STATUSES doesn't list (auto) shows at the end:
+      // the chart groups it by the colour of each mark (see GROUP_BY_COLOUR in data.js).
+      const list = schoolCodes
+        ? schoolCodes.map((c) => [c.code, c.name, c.group || "other", !c.group])
+        : STATUSES.map(([, code, name, group]) => [code, name, group, false]);
+      const other = { key: "other", label: "Other codes (grouped by Compass's colour)", color: "#fff" };
+      for (const g of [...groups, other]) {
         const seen = new Set();
-        const rows = STATUSES.filter(([, code, name, group]) => {
+        const rows = list.filter(([code, name, group]) => {
           const key = code + "|" + name;
           if (group !== g.key || seen.has(key)) return false;
           seen.add(key);
@@ -103,13 +115,20 @@ globalThis.CompassAttendanceUI = (() => {
         const sw = document.createElement("span");
         sw.className = g.hatch ? "sw hatch" : "sw";
         sw.style.backgroundColor = g.color;
-        if (g.key === "excluded") sw.style.border = "1px solid #9aa0a6";
+        if (g.key === "excluded" || g.key === "other") sw.style.border = "1px solid #9aa0a6";
         h.append(sw, document.createTextNode(g.label));
         const table = document.createElement("table");
-        for (const [, code, name] of rows) {
+        for (const [code, name, , auto] of rows) {
           const tr = table.insertRow();
           const c = tr.insertCell(); c.className = "code"; c.textContent = code;
-          tr.insertCell().textContent = name;
+          const n = tr.insertCell();
+          n.textContent = name;
+          if (auto) {
+            const tag = Object.assign(document.createElement("span"), { className: "auto", textContent: "auto" });
+            tag.title = "This code isn't in the extension's list. The chart groups it by the colour Compass gives it " +
+              "(green: Present, red: Unapproved, orange: Approved). Add it to STATUSES in src/widgets/attendance/data.js to choose its group.";
+            n.append(tag);
+          }
         }
         infoPanel.append(h, table);
       }
@@ -118,6 +137,11 @@ globalThis.CompassAttendanceUI = (() => {
       const open = infoPanel.hidden;
       if (open) {
         buildInfo();
+        if (!schoolCodes) {
+          globalThis.CompassAttendance.schoolCodeList()
+            .then((codes) => { schoolCodes = codes; if (!infoPanel.hidden) buildInfo(); })
+            .catch(() => {}); // the panel keeps the STATUSES list
+        }
         const header = root.querySelector("header");
         infoPanel.style.setProperty("--info-top", header.offsetTop + header.offsetHeight + 4 + "px");
       }
@@ -397,28 +421,33 @@ globalThis.CompassAttendanceUI = (() => {
     }
 
     function renderChart() {
-      let students = null; // null: nothing selected
+      // pick(list): the students of `list` in the filter, or null when nothing is selected.
+      let pick;
       if (G.isGroups(selected)) {
         let members;
         try { members = groupMembers.get(selected); }
         catch (e) { drawChart([`Couldn't load the members of ${G.label(selected)}: ${e.message || e}`], null, { isError: true }); return; }
         if (!members) { drawChart([sessionLabel(data.date, data.half), `Loading ${G.label(selected)}…`], null); return; }
-        students = filterByUsers(data.students, members);
+        pick = (list) => filterByUsers(list, members);
       } else {
         const sel = currentSelection();
-        if (sel.length) students = filterByYears(data.students, sel);
+        pick = (list) => (sel.length ? filterByYears(list, sel) : null);
       }
+      const students = pick(data.students);
 
       const none = !students;
       const res = tally(none ? [] : students, data.date, data.half, data.notMarked);
-      const notCounted = none ? 0 : res.counts.excluded;
+      // Enrolled: every active student in the filter. By period, the rolls have only the
+      // students with a class, so the roster gives the rest.
+      const enrol = none ? null : enrolment((pick(data.roster || data.students) || []).length, res.counts && { ...res.counts, total: res.total });
       drawChart([
         sessionLabel(data.date, data.half),
-        none ? "No year groups selected" : `${res.total} students` + (notCounted ? ` (+${notCounted} not counted)` : ""),
+        none ? "No year groups selected" : enrol.enrolled > res.total ? `${res.total} of ${enrol.enrolled} enrolled` : `${res.total} students`,
       ], res);
-      if (notCounted) {
+      const gap = enrol ? enrolmentNote(enrol) : "";
+      if (gap) {
         const line = root.querySelector(".subrow .sub .line");
-        line.title += `\n${notCounted} student(s) weren't expected at school (not required to attend, school closure or unscheduled), so they're left out of the chart. See (i) for the codes.`;
+        line.title += `\n${gap} The chart shows the counted students. See (i) for the codes.`;
       }
 
       const notes = [];
@@ -434,6 +463,11 @@ globalThis.CompassAttendanceUI = (() => {
         line.title += `\nIncludes ${uc.students} student(s) in ${uc.rolls} unmarked roll(s) as Not marked.`;
       }
       if (sessionMode === "period" && data.periodError) notes.push([`By period isn't available now, so the chart shows the ${data.half.toUpperCase()} roll: ${data.periodError}`]);
+      if (res.autoCodes?.length) {
+        notes.push(["New code" + (res.autoCodes.length === 1 ? "" : "s") + ", grouped by Compass's colour: " +
+          res.autoCodes.map((a) => `${a.label} ×${a.count} as ${CATEGORIES.find((c) => c.key === a.group)?.label || a.group}`).join(", ") +
+          ". Check the group in src/widgets/attendance/data.js."]);
+      }
       if (res.unknownCodes.length) {
         notes.push(["Unmapped codes, left out: " + res.unknownCodes.map(([k, n]) => `${k} ×${n}`).join(", ") + ". Add them to src/widgets/attendance/data.js."]);
       }

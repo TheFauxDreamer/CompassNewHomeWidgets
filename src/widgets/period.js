@@ -586,5 +586,5 @@ globalThis.CompassPeriodUI = (() => {
     } };
   }
 
-  return { mount };
+  return { mount, encodeShare, decodeShare };
 })();

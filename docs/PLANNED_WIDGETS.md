@@ -16,7 +16,6 @@ When a widget is built, move it to the "Widgets and features" section of ../READ
 | Widget | What it shows | Data |
 | --- | --- | --- |
 | **Unexplained absences today** | The students with a U, W or P code, or with no mark after the roll, in groups by year group. The office can then contact the families. | The attendance grid in `src/widgets/attendance/data.js`. The query must also get the student names. A HAR file must confirm the name field. |
-| **Attendance trend** | A small line chart of the whole-school % present for the last 10 sessions (this week and last week). It uses the year-group filter. | The same two weeks of data that `src/widgets/attendance/data.js` already gets. |
 | **Attendance watchlist** | The students with less than 90% (or less than 80%) attendance for the term, by year group. | Many weeks of the attendance grid (slow), or a term summary request. HAR necessary: Attendance > Reports, or the attendance summary of a student. |
 
 ## High value (HAR necessary)

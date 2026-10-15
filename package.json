@@ -1,0 +1,8 @@
+{
+  "name": "compass-homepage-widgets",
+  "private": true,
+  "description": "Tests for the extension. Chrome ignores this file. No dependencies: the tests use Node's built-in test runner (Node 20 or later).",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\""
+  }
+}
