@@ -62,6 +62,8 @@ Click **Periods** or **On site** to change the graph. The browser keeps your cho
   Click **By year** (at the start of the legend) to also show one coloured line for each year group. Each year group's line is the percentage of that year group on site.
   The dark line is the total. The legend shows each year group's percentage now. Put the pointer on the graph to see every year group at that time.
   The colours stay the same for each year group, also when you change the filter. The graph shows up to eight year groups. Click **Total** to show only the total.
+  Click **Fit** (in the legend) to make the % axis fit the lines, for example from 80% to 100%, so small changes are easier to see. Click **0–100%** to show the full axis again.
+  The browser keeps your choice. The **Periods** bars always use 0–100%, because each bar shows all the students split into groups.
 - Put the pointer on a bar or on the line to see the numbers. The legend shows the counts for the latest period.
 - The chip below the title shows the year groups or the Custom Groups. Click the chip to change the selection.
 - The widget shows counts only. It never shows a student's name.

@@ -148,7 +148,8 @@ globalThis.CompassDayAttendanceUI = (() => {
     const VIEW_KEY = "dayAttendanceView";   // "periods" | "onsite"
     const YEARS_KEY = "dayYearGroups";      // array of year names; null = all; or a group selection (groups.js)
     const SPLIT_KEY = "dayOnsiteSplit";     // "total" | "years": the On site view's lines
-    let view = "periods", years = null, split = "total";
+    const SCALE_KEY = "dayOnsiteScale";     // "full" (0–100%) | "fit": the On site view's % axis
+    let view = "periods", years = null, split = "total", scale = "full";
     const save = (key, value) => { try { chrome.storage.local.set({ [key]: value }); } catch (_) {} };
 
     // --- filter (the same as the other widgets, with its own selection) ----------------------
@@ -174,6 +175,11 @@ globalThis.CompassDayAttendanceUI = (() => {
     }
     for (const b of root.querySelectorAll("#view button")) b.onclick = () => setView(b.dataset.v, true);
     showView();
+    function setScale(v, fromUser) {
+      scale = v === "fit" ? "fit" : "full";
+      if (fromUser) save(SCALE_KEY, scale);
+      draw();
+    }
     function setSplit(v, fromUser) {
       split = v === "years" ? "years" : "total";
       if (fromUser) save(SPLIT_KEY, split);
@@ -339,16 +345,22 @@ globalThis.CompassDayAttendanceUI = (() => {
       const m = { l: 30, r: 6, t: 6, b: 18 };
       const from = periods[0].start.getTime(), to = Math.max(...periods.map((p) => p.finish.getTime()));
       const x = (t) => m.l + ((t - from) / (to - from)) * (W - m.l - m.r);
-      const y = (p) => m.t + (1 - p) * (H - m.t - m.b);
+      // The % axis runs from `low` to 100%. low is 0, except in the On site view with "Fit" (the
+      // bars always start at 0%, because each bar is a whole split into parts).
+      let low = 0;
+      const y = (p) => m.t + (1 - (p - low) / (1 - low)) * (H - m.t - m.b);
+      const bottom = H - m.b;
       const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
       const defs = svgEl("defs");
       defs.innerHTML = '<pattern id="dhatch" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">' +
         '<rect width="2" height="5" fill="rgba(255,255,255,.5)"/></pattern>';
       svg.append(defs);
-      for (const p of [0, 0.5, 1]) {
-        svg.append(svgEl("line", { x1: m.l, x2: W - m.r, y1: y(p), y2: y(p), class: "grid" }));
-        svg.append(Object.assign(svgEl("text", { x: m.l - 4, y: y(p) + 3, "text-anchor": "end", class: "axis" }), { textContent: `${p * 100}%` }));
-      }
+      const drawGrid = () => {
+        for (const p of [low, (low + 1) / 2, 1]) {
+          svg.append(svgEl("line", { x1: m.l, x2: W - m.r, y1: y(p), y2: y(p), class: "grid" }));
+          svg.append(Object.assign(svgEl("text", { x: m.l - 4, y: y(p) + 3, "text-anchor": "end", class: "axis" }), { textContent: `${Math.round(p * 100)}%` }));
+        }
+      };
 
       const legend = $("legend");
       legend.textContent = "";
@@ -368,6 +380,7 @@ globalThis.CompassDayAttendanceUI = (() => {
 
       let summary, summaryNote = "";
       if (view === "periods") {
+        drawGrid();
         // One stacked column for each period, across its start–finish time; 2px gaps.
         periods.forEach((p, i) => {
           const x0 = x(p.start.getTime()) + 1, x1 = x(p.finish.getTime()) - 1, bw = Math.max(2, x1 - x0);
@@ -432,11 +445,18 @@ globalThis.CompassDayAttendanceUI = (() => {
             byYear.push({ year: yr, colour: YEAR_COLOURS[slot], total: ys.length, pts: samples(onSiteChanges(ys, periods, moves), from, until) });
           }
         }
+        // Fit: from a round number below the lowest point of any line to 100%, as in Attendance Trend.
+        if (scale === "fit") {
+          const values = [...pts.map((p) => (total ? p.count / total : 1)),
+            ...byYear.flatMap((g) => (g.total ? g.pts.map((p) => p.count / g.total) : []))];
+          if (values.length) low = Math.min(0.9, Math.max(0, Math.floor((Math.min(...values) * 100 - 5) / 10) * 10 / 100));
+        }
+        drawGrid();
         const path = (list, tot) => list.map((p, i) => `${i ? "L" : "M"}${x(p.time.getTime()).toFixed(1)},${y(p.count / tot).toFixed(1)}`).join("");
         if (pts.length && total) {
           const line = path(pts, total);
           const colour = byYear.length ? TOTAL_COLOUR : "#0072B2";
-          if (!byYear.length) svg.append(svgEl("path", { d: `${line}L${x(pts[pts.length - 1].time.getTime()).toFixed(1)},${y(0)}L${x(from)},${y(0)}Z`, fill: colour, "fill-opacity": 0.12 }));
+          if (!byYear.length) svg.append(svgEl("path", { d: `${line}L${x(pts[pts.length - 1].time.getTime()).toFixed(1)},${bottom}L${x(from)},${bottom}Z`, fill: colour, "fill-opacity": 0.12 }));
           for (const g of byYear) {
             if (g.total) svg.append(svgEl("path", { d: path(g.pts, g.total), fill: "none", stroke: g.colour, "stroke-width": 2, "stroke-linejoin": "round" }));
           }
@@ -466,6 +486,17 @@ globalThis.CompassDayAttendanceUI = (() => {
           seg.append(b);
         }
         legend.append(seg);
+        // 0–100% / Fit: the range of the % axis.
+        const fit = el("div", "seg");
+        for (const [v, text, tip] of [["full", "0–100%", "The % axis from 0% to 100%"], ["fit", "Fit", "The % axis fits the lines, so small changes are easier to see"]]) {
+          const b = el("button", null, text);
+          b.type = "button";
+          b.title = tip;
+          b.setAttribute("aria-pressed", String(scale === v));
+          b.onclick = () => setScale(v, true);
+          fit.append(b);
+        }
+        legend.append(fit);
         if (byYear.length) {
           legendItem(TOTAL_COLOUR, "All", `${pct(nowCount, total)}%`, { line: true });
           for (const g of byYear) {
@@ -486,7 +517,7 @@ globalThis.CompassDayAttendanceUI = (() => {
       // Playhead: the current time.
       if (now.getTime() >= from && now.getTime() <= to) {
         const px = x(now.getTime());
-        svg.append(svgEl("line", { x1: px, x2: px, y1: m.t, y2: y(0), class: "head" }, `Now · ${fmtTime(now)}`));
+        svg.append(svgEl("line", { x1: px, x2: px, y1: m.t, y2: bottom, class: "head" }, `Now · ${fmtTime(now)}`));
       }
       plot.append(svg);
       // Text only (period names come from Compass), joined with " · ". A { b, after } part has
@@ -574,8 +605,9 @@ globalThis.CompassDayAttendanceUI = (() => {
     }
 
     try {
-      chrome.storage.local.get([VIEW_KEY, YEARS_KEY, SPLIT_KEY], (r) => {
+      chrome.storage.local.get([VIEW_KEY, YEARS_KEY, SPLIT_KEY, SCALE_KEY], (r) => {
         split = r?.[SPLIT_KEY] === "years" ? "years" : "total";
+        scale = r?.[SCALE_KEY] === "fit" ? "fit" : "full";
         view = r?.[VIEW_KEY] === "onsite" ? "onsite" : "periods";
         showView();
         years = G.validSelection(r?.[YEARS_KEY] ?? null);
@@ -588,6 +620,7 @@ globalThis.CompassDayAttendanceUI = (() => {
         const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
         if (VIEW_KEY in changes && changes[VIEW_KEY].newValue !== view) setView(changes[VIEW_KEY].newValue, false);
         if (SPLIT_KEY in changes && changes[SPLIT_KEY].newValue !== split) setSplit(changes[SPLIT_KEY].newValue, false);
+        if (SCALE_KEY in changes && changes[SCALE_KEY].newValue !== scale) setScale(changes[SCALE_KEY].newValue, false);
         if (YEARS_KEY in changes && !same(changes[YEARS_KEY].newValue, years)) setYears(changes[YEARS_KEY].newValue ?? null, false);
       };
       chrome.storage.onChanged.addListener(onChanged);
