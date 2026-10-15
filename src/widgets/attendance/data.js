@@ -231,6 +231,17 @@ globalThis.CompassAttendance = (() => {
   const NOT_MARKED_ID = 470;
   const ROLL_REQUESTS_AT_ONCE = 6;
 
+  // "2026-09-25T03:50:00Z", or "/Date(1790272200000+1000)/". Gives a Date or null.
+  function parseWhen(...values) {
+    for (const v of values) {
+      if (v == null || v === "") continue;
+      const ms = /\/Date\((-?\d+)/.exec(String(v));
+      const d = ms ? new Date(Number(ms[1])) : new Date(v);
+      if (!isNaN(d)) return d;
+    }
+    return null;
+  }
+
   async function fetchUnmarkedRolls(now) {
     // A wider window than today, in case Compass reads the dates as UTC; today is kept below.
     const filter = JSON.stringify([
@@ -247,7 +258,7 @@ globalThis.CompassAttendance = (() => {
       if (!d.data.length || items.length >= (d.total ?? 0)) break;
     }
     const today = now.toDateString();
-    return items.filter((it) => { const s = new Date(it.s); return !isNaN(s) && s.toDateString() === today && s <= now; });
+    return items.filter((it) => { const s = parseWhen(it.s, it.start); return s && s.toDateString() === today && s <= now; });
   }
 
   // How one entry of a student's day timeline (in a class roll) reads: { id, name, code, notMarked }.
@@ -256,7 +267,9 @@ globalThis.CompassAttendance = (() => {
   function timelineStatus(entry) {
     const es = entry.extendedStatus || {};
     const id = es.id ?? entry.status;
-    return { id, name: es.n || entry.statusName, code: entry.exportId, notMarked: !!es.periodCalc_NotMarked || id === NOT_MARKED_ID };
+    // No status at all (a roll that no one has opened) is not marked too.
+    return { id, name: es.n || entry.statusName, code: entry.exportId,
+      notMarked: !!es.periodCalc_NotMarked || id === NOT_MARKED_ID || id == null || id === 0 };
   }
 
   // One class roll (the same call as opening a class roll), or null when there is no such roll.
@@ -279,38 +292,55 @@ globalThis.CompassAttendance = (() => {
     return out;
   }
 
-  // The not-marked students of one roll: [{ uid, half }]. Each student's timeline has every
-  // period of the day; the entry that starts with the roll is the roll's own. Its half is
-  // "am"/"pm" by name (AM and PM periods), or else by whether it starts before the middle
-  // of the school day.
-  async function rollNotMarked(instanceId) {
+  // The entry of a student's day timeline that belongs to the roll: the one that starts at the
+  // roll's start (compared as times, not text), or else the one that is on at that time.
+  function ownEntry(day, rollStart) {
+    const t = parseWhen(rollStart)?.getTime();
+    if (t == null) return day.find((p) => p.start === rollStart) || null;
+    return day.find((p) => parseWhen(p.start)?.getTime() === t)
+      || day.find((p) => { const a = parseWhen(p.start), b = parseWhen(p.finish); return a && b && a.getTime() <= t && t < b.getTime(); })
+      || null;
+  }
+
+  // The not-marked students of one roll: { opened, students: [{ uid, half }] }. Each student's
+  // timeline has every period of the day; ownEntry() finds the roll's own. Its half is "am"/"pm"
+  // by name (for example "AM" or "AM Roll"), or else by whether it starts before the middle of
+  // the school day.
+  async function rollNotMarked(instanceId, fallbackStart) {
     const data = await fetchRoll(instanceId);
-    if (!data) return [];
+    if (!data) return { opened: false, students: [] };
     const out = [];
     for (const r of data.rollData) {
       const day = Array.isArray(r.userTimeLinePeriods) ? r.userTimeLinePeriods : [];
-      const own = day.find((p) => p.start === data.start);
+      const own = ownEntry(day, data.start ?? fallbackStart);
       if (!own || !timelineStatus(own).notMarked || r.uid == null) continue;
-      let half = /^(am|pm)$/i.test(String(own.name || "").trim()) ? own.name.trim().toLowerCase() : null;
+      const name = String(own.name || "").trim().toLowerCase();
+      let half = /\bam\b/.test(name) ? "am" : /\bpm\b/.test(name) ? "pm" : null;
       if (!half) {
-        const first = Math.min(...day.map((p) => new Date(p.start)));
-        const last = Math.max(...day.map((p) => new Date(p.finish)));
-        half = new Date(own.start) < (first + last) / 2 ? "am" : "pm";
+        const first = Math.min(...day.map((p) => parseWhen(p.start)));
+        const last = Math.max(...day.map((p) => parseWhen(p.finish)));
+        half = parseWhen(own.start) < (first + last) / 2 ? "am" : "pm";
       }
       out.push({ uid: Number(r.uid), half });
     }
-    return out;
+    return { opened: true, students: out };
   }
 
-  // { am: Set(user IDs), pm: Set(user IDs) } for today.
+  // { am: Set(user IDs), pm: Set(user IDs), rolls, opened, failed } for today. rolls: the
+  // unmarked rolls that have started; opened: the ones Compass gave; failed: requests that
+  // failed. The counts show in the chart, so a problem here is visible.
   // onProgress({ done, total, label }) runs as the rolls load.
   async function unmarkedStudents(now = new Date(), onProgress = null) {
     const rolls = await fetchUnmarkedRolls(now);
-    const result = { am: new Set(), pm: new Set() };
+    const result = { am: new Set(), pm: new Set(), rolls: rolls.length, opened: 0, failed: 0 };
     const step = (done, total) => onProgress?.({ done, total, label: "unmarked rolls" });
     if (rolls.length) step(0, rolls.length);
-    const found = await inBatches(rolls, (it) => rollNotMarked(it.id).catch(() => []), step);
-    for (const { uid, half } of found.flat()) result[half].add(uid);
+    const found = await inBatches(rolls, (it) => rollNotMarked(it.id, it.s ?? it.start)
+      .catch(() => { result.failed++; return { opened: false, students: [] }; }), step);
+    for (const f of found) {
+      if (f.opened) result.opened++;
+      for (const { uid, half } of f.students) result[half].add(uid);
+    }
     return result;
   }
 
@@ -422,8 +452,11 @@ globalThis.CompassAttendance = (() => {
     // For today's session, also count the students in rolls that aren't marked yet. If this
     // fails, the chart still shows the half-day grid.
     if (result && result.date === fmt(now)) {
-      try { result.notMarked = (await unmarkedStudents(now, onProgress))[result.half]; }
-      catch (e) { result.notMarkedError = e.message || String(e); }
+      try {
+        const u = await unmarkedStudents(now, onProgress);
+        result.notMarked = u[result.half];
+        result.unmarkedCheck = { rolls: u.rolls, opened: u.opened, failed: u.failed, students: u[result.half].size };
+      } catch (e) { result.notMarkedError = e.message || String(e); }
     }
     return result;
   }
@@ -457,10 +490,10 @@ globalThis.CompassAttendance = (() => {
     const lines = (await fetchWeek(fmt(mondayOf(now)), ids)).filter((l) => l.isActive !== false);
 
     if (isAmPm(periods)) {
-      let notMarked = { am: new Set(), pm: new Set() };
+      let notMarked = { am: new Set(), pm: new Set() }, unmarkedError = "";
       if (started.some(Boolean)) {
         onProgress?.({ step: "rolls", label: "unmarked rolls" });
-        try { notMarked = await unmarkedStudents(now, onProgress); } catch (_) {}
+        try { notMarked = await unmarkedStudents(now, onProgress); } catch (e) { unmarkedError = e.message || String(e); }
       }
       const halves = periods.map((p) => String(p.name).trim().toLowerCase());
       const students = lines.map((l) => {
@@ -475,7 +508,9 @@ globalThis.CompassAttendance = (() => {
           }),
         };
       });
-      return { date, periods, students, mode: "halfday" };
+      const unmarkedCheck = notMarked.rolls != null
+        ? { rolls: notMarked.rolls, opened: notMarked.opened, failed: notMarked.failed, students: notMarked.am.size + notMarked.pm.size } : null;
+      return { date, periods, students, mode: "halfday", unmarkedCheck, unmarkedError };
     }
 
     onProgress?.({ step: "classes" });

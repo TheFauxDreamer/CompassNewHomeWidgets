@@ -503,6 +503,11 @@ globalThis.CompassDayAttendanceUI = (() => {
 
     function drawStatus() {
       if (error && day) setStatus(`Couldn't refresh · trying again in ${REFRESH_MINUTES} min`, true);
+      else if (day?.unmarkedError) setStatus(`Couldn't check the unmarked rolls: ${day.unmarkedError}`, true);
+      else if (day?.unmarkedCheck?.rolls && !day.unmarkedCheck.students) {
+        const u = day.unmarkedCheck;
+        setStatus(`${u.rolls} unmarked roll${u.rolls === 1 ? "" : "s"}, but no not-marked students found (${u.opened} opened${u.failed ? `, ${u.failed} failed` : ""})`, true);
+      }
       else if (day && lastUpdated) setStatus(`${fmtDay(lastUpdated)} · updated ${fmtTime(lastUpdated)} · refreshes every ${REFRESH_MINUTES} min`);
       else setStatus(`Refreshes every ${REFRESH_MINUTES} min`);
     }

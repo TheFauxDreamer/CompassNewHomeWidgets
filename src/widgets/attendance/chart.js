@@ -422,6 +422,17 @@ globalThis.CompassAttendanceUI = (() => {
       }
 
       const notes = [];
+      // The check of today's unmarked rolls (data.js): say when it failed or found no students.
+      const uc = data.unmarkedCheck;
+      if (data.notMarkedError) notes.push([`Couldn't check today's unmarked rolls, so students in them may show with the half-day mark: ${data.notMarkedError}`]);
+      else if (uc && uc.rolls && !uc.students) {
+        notes.push([`${uc.rolls} unmarked roll${uc.rolls === 1 ? " has" : "s have"} started, but no not-marked students were found in them ` +
+          `(${uc.opened} opened${uc.failed ? `, ${uc.failed} failed` : ""}).`]);
+      }
+      if (uc?.students) {
+        const line = root.querySelector(".subrow .sub .line");
+        line.title += `\nIncludes ${uc.students} student(s) in ${uc.rolls} unmarked roll(s) as Not marked.`;
+      }
       if (sessionMode === "period" && data.periodError) notes.push([`By period isn't available now, so the chart shows the ${data.half.toUpperCase()} roll: ${data.periodError}`]);
       if (res.unknownCodes.length) {
         notes.push(["Unmapped codes, left out: " + res.unknownCodes.map(([k, n]) => `${k} ×${n}`).join(", ") + ". Add them to src/widgets/attendance/data.js."]);
