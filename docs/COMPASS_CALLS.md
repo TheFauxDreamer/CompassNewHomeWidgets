@@ -82,8 +82,9 @@ These calls send real emails. The widget always asks the user first.
 | --- | --- | --- | --- |
 | `Calendar.svc/GetCalendarEventsByUserWeb` | `{ userId, startDate: "2026-07-20", endDate, homePage: true }`. `userId` comes from `Compass.organisationUserId` in the page. | `d[]`: `start`, `finish`, `allDay`, `longTitleWithoutTime`/`title`, `backgroundColor`, `calendarId`, `activityType` (1 class, 2 event, 10 learning task), `activityTypeName`. | Term Calendar dots |
 | `Calendar.svc/GetActivityLayers` | `{}` | `d[]`: `id`, `name`, `scheduleBgColor`, `showOnHomePage`, `isHidden`. | Term Calendar dots (the calendar chooser) |
+| `TaskService.svc/GetTaskItems` | `{ page: 1, start: 0, limit: 100 }` | `d[]`: `id` (the row's `data-recordid`), `status` (true = done), `dueDate` (the format isn't confirmed yet: the parser reads `/Date()/`, ISO and day/month text). Also `taskName`. | My Tasks due-date colours (`task-extras.js`). Loaded again when the task grid changes, at most once every 5 seconds. |
 
-The My Tasks additions (`task-extras.js`) and Countdown colours make no Compass calls. They read the widgets on the page.
+The My Tasks names and sub-tasks, and the Countdown colours, make no Compass calls. They read the widgets on the page.
 
 ## Calls that we know but don't use
 
@@ -93,7 +94,6 @@ These calls were seen in Compass pages (HAR files) or are in code that is switch
 
 | Call | Body | Response |
 | --- | --- | --- |
-| `TaskService.svc/GetTaskItems` | `{ page: 1, start: 0, limit: 25 }` | `d[]`: `id`, `taskName` (one line), `status` (true = done), `dueDate`. |
 | `TaskService.svc/UpdateTaskItem` | `{ task: { id, taskName, status, dueDate } }` | `d: null`. Changes a task. It could save sub-task ticks in Compass, but it would change the task name that the user sees. |
 
 ### Attendance (GraphQL, at `/graphql/`)
@@ -108,6 +108,38 @@ These calls were seen in Compass pages (HAR files) or are in code that is switch
 | `GetReferenceData` | none | `currentOrganisation`: `id`, `systemType`, `schoolLogo`, `schoolSystemTypeRefData[]` (`id`, `type`, `countryCode`, `isAustralian`, `isCanadian`, `isEnglish`, `isIrish`, `isIndonesian`). |
 | `GetGroupActivityTrackingCases`, `GetGroupActivityTrackingCaseDetail(caseId)` | `{ activityId, status, includeExcludedActivities }` | Attendance tracking cases: student, class, missed count, status, attempts. For a "students at risk" widget. |
 | `GetInstancesOutsideOfBounds` | `{ activityId, startTime, finishTime }` | Class instances outside the period structure. |
+
+### News and feed
+
+Seen on the homepage and on Communicate > News. Where the body says "not in the HAR", the browser didn't save it, so check it with a new HAR before using the call.
+
+| Call | Body | Response |
+| --- | --- | --- |
+| `Newsfeed.svc/GetAllExpiredNewsItems` | `{ start: 0, limit: 10, sort: "string", filterOptions: {} }` (Compass's News page also asks with `limit: 500`) | `d.total` (all expired posts, more than 1,000 at the school we tested) and `d.data[]`: `NewsItemId`, `Title`, `Content1` (the post body, HTML), `Content2`, `Start`, `Finish`, `PostDateTime`, `UserId`, `UserName`, `CreatedByAdmin`, `Attachments[]`, `Tags[]`, `Priority`, `Locked`, `NewsItemGroupTargets[]` (`BaseRole`, `YearLevels`, `FormGroups`, `Houses`, `CampusIds`, `ActivityIds`, `UserIds`, `Future`), `NewsItemCustomGroupTargets` (`CampusIds`, `CustomGroupIds`), `NewsItemAlumTargets`, the comment and reaction switches (`IsFeed…Enabled`) and the publishing flags (`PublicWebsite`, `PublishTo…`). Newest first. Seen with an account that can manage news; not yet confirmed for an ordinary staff account. |
+| `Newsfeed.svc/GetMyOwnNewsItems` | `{ start: 0, limit: 10, sort: "string", filterOptions: {} }` | The user's own posts: the same fields as above, in `d.data[]`, and `d.total`. |
+| `Newsfeed.svc/SaveNew` | not in the HAR | A news post with the same fields as above (the new or saved post). |
+| `Newsfeed.svc/GetGroupTargetOptions` | not in the HAR | `d`: `BaseRole`, `YearLevels[]`, `FormGroups[]`, `Houses[]`, `CampusIds`, `ActivityIds`, `UserIds`, `Future`: the audiences a post can target. |
+| `Newsfeed.svc/GetMyAlerts` | not in the HAR | `d[]`: `AlertItemId`, `Title`, `Body`, `Content`, `LinkText`, `LinkUrl`, `ImageSourceUrl`, `IsWarning`, `Dismissible`, `Type`. |
+| `NewsFeed.svc/GetArchivedYearLevelShortNames` | not in the HAR | `d[]`: `Key`, `Value` (a year level's short name). |
+| `Feed.svc/GetFeedItems` | not in the HAR | The homepage feed: `d[]` with `feedItemId`, `newsFeedItemId`, `title`, `itemContent` (HTML), `start`, `createdTimestamp`, `createdUserName`, `userIdCreator`, `attachments[]` (`attachmentId`, `name`, `path`, `type`), `tags[]`, `isPriority`, `isRead`, `isSaved`, `isViewed`, `viewCount`, `commentCount`, `comments[]`, `reactionCount[]`, `canComment`, `canReact`. Current posts only. |
+| `Feed.svc/GetUnreadCount`, `GetSavedCount`, `GetFilterViewUserAttribute` | not in the HAR | `d`: a number. |
+| `FileDownload/FileRequestHandler` | `GET ?FileDownloadType=…&attachmentId=…&preview=true&source=feed` | A news attachment (an image or a file), not JSON. |
+
+### Homepage, settings and reference data
+
+| Call | Body | Response |
+| --- | --- | --- |
+| `Calendar.svc/GetCalendarEventsByUser` | `{ userId, homePage: true, activityId: null, subjectId: null, locationId: null, staffIds: null, startDate, endDate, page, start, limit }`, with `?ExcludeNonRelevantPd=true` | `d[]`: the user's events, with `activityId`, `activityType`, `instanceId`, `start`, `finish`, `allDay`, `title`, `description`, `location`, `backgroundColor`, `calendarId`, `attendanceMode`, `isRecurring` and more. The older call beside `GetCalendarEventsByUserWeb`. |
+| `Configure.svc/GetTeachingDaysForPeriod` | not in the HAR | `d`: a number of teaching days. |
+| `Configure.svc/GetMyFavouriteModules`, `GetAvailableWebFavouriteDefinitions` | not in the HAR | `d[]`: `name`, `url` (the menu favourites). |
+| `Configure.svc/GetModuleSchoolAttributes` | not in the HAR | `d[]`: the school's settings for a module (`attributeName`, `attributeGroup`, `attributeType`, `defaultValue`, `description`, …). |
+| `Device.svc/HasDevice` | not in the HAR | `d`: true when the user has the Compass app. |
+| `PeopleManagement.svc/GetCustomGroups` | not in the HAR | `d[]`: `id`, `name`, `description`, `memberCount`, `userBaseRole`. All groups, not only student groups: the extension must keep using `GetCustomGroupsByBaseRole`. |
+| `User.svc/GetAllStaffWithoutActiveAt` | not in the HAR | `d[]`: all staff with `id`, `displayCode`, `fn`/`ln`/`f` (names), `baseRole`, contact fields and more. Personal data: use only when a widget needs it. |
+| `ReferenceDataCache.svc/GetAllTerms`, `GetCurrentTerm` | `GET ?page=1&start=0&limit=25` | `d` (one term) or `d[]`: `id`, `n` (name), `s`/`f` (start and finish), `sl`, `cy`. Could give term-based ranges (for example a term attendance trend). |
+| `ReferenceDataCache.svc/GetAllCampuses` | `GET` | `d[]`: `campusId`, `campusName`, `name`, `defaultCampus`, `active`, `archived`, `campusGuid`, `importIdentifier`, `ageId`. |
+| `ReferenceDataCache.svc/GetActiveCategories` | `GET ?page=1&start=0&limit=25` | `d[]` (empty at the school we tested). |
+| `ReferenceDataCache.svc/GetTranslation` | `GET ?language=en&namespace=translation` | Compass's interface text, not JSON. |
 
 ### Other
 

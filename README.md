@@ -168,6 +168,8 @@ Set up the timetable one time, then share it with the other staff as a code. The
 
 The code includes the Mon–Fri timetable and the days that have their own timetable.
 
+To share one timetable with all staff through a Compass News post (coming soon), click **Share with all staff (News post)** in the gear panel for the steps. The same steps are in [docs/SCHOOL_TIMETABLE_POST.md](docs/SCHOOL_TIMETABLE_POST.md).
+
 #### Times on the timeline
 
 The labels below the timeline show the hours (the default). To show the start time of each period instead, click the gear button,
@@ -234,7 +236,7 @@ This feature lets each Compass "Countdown" widget have its own colour, so severa
 Put the pointer on a countdown, then click the round colour button at its top right. Select a colour from the list, or select **Compass default** to go back to the normal colour.
 The colour is saved in this browser, by the countdown's title. If you rename a countdown, choose its colour again.
 
-### Task list: full names and sub-tasks
+### Task list: full names, sub-tasks and due dates
 
 This feature adds to the Compass task list on the homepage.
 
@@ -245,6 +247,14 @@ This feature adds to the Compass task list on the homepage.
   The ticks are saved in this browser only. Compass keeps the full task name, so other browsers and the Compass app show the name with the ` | ` parts.
 
 Use ` | ` because many task names already use " - " as normal punctuation. To add or change sub-tasks, edit the task name in Compass.
+
+- **Due dates:** the row of a task with a due date changes colour as the date comes near:
+  - red: the due date has passed;
+  - orange: the task is due today;
+  - yellow: the task is due in the next 2 school days (Monday to Friday, so on a Thursday a task due on Monday is yellow).
+
+  A task that is ticked done, or that has no due date, keeps the normal colour. Put the pointer on the due date to see, for example, "Overdue by 2 days" or "Due Mon 19 Oct".
+  The colours update every minute, so a task turns orange or red at midnight without a page reload.
 
 ### Toolbar panel
 
@@ -374,12 +384,13 @@ Set `TEST_NAMES` back to `false` before you release the extension.
 | `src/homepage/homepage.js` | Adds the widgets to the Compass homepage and to the layout editor. Moves and hides the widgets. Shows the welcome card while no widget is on the homepage. |
 | `src/homepage/calendar-dots.js` | Adds the event dots to the Term Calendar widget. |
 | `src/homepage/countdown-colours.js` | Adds the colour choice to the Compass Countdown widgets. |
-| `src/homepage/task-extras.js` | Adds the full names on hover and the sub-tasks to the Compass task list. |
+| `src/homepage/task-extras.js` | Adds the full names on hover, the sub-tasks and the due-date colours to the Compass task list. |
 | `src/toolbar/background.js`, `src/toolbar/panel.js` | Open the Attendance chart from the toolbar icon. `background.js` also gets the BOM files. |
 | `icons/` | The extension icons. |
 | `docs/PLANNED_WIDGETS.md` | Ideas for new widgets. |
 | `tests/` | The automated tests (see "Run the tests"). `tests/load.js` loads the scripts into Node. |
 | `package.json` | Only the `npm test` command. Chrome ignores this file. |
+| `docs/SCHOOL_TIMETABLE_POST.md` | How admins share the timetable in a staff-only news post (coming soon). |
 | `docs/COMPASS_CALLS.md` | Every Compass request that each widget makes, and the requests we know but don't use yet. |
 
 ### Load order

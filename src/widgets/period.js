@@ -70,6 +70,14 @@ globalThis.CompassPeriodUI = (() => {
     .share { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 2px; }
     .share .ok { color: #1E7B34; font-size: 12px; }
     .share .err { color: #b3261e; font-size: 12px; }
+    .newshelp { font-size: 12px; color: #3E4B62; background: #F7F8FA; border-radius: 6px; padding: 6px 8px; margin-top: 2px; }
+    .newshelp p { margin: 0 0 4px; }
+    /* The theme styles every list as a chart legend (fixed-height flex rows, no numbers): undo that here. */
+    .newshelp ol, .newshelp ul { flex: none; min-width: 0; max-height: none; overflow: visible; margin: 2px 0 0; }
+    .newshelp ol { list-style: decimal; padding-left: 18px; }
+    .newshelp ul { list-style: disc; padding-left: 16px; }
+    .newshelp li { display: list-item; height: auto; gap: 0; line-height: 1.4; margin: 1px 0; overflow-wrap: anywhere; }
+    .newshelp .soon { color: #5f6368; font-style: italic; }
     .share input { flex: 1 1 160px; min-width: 0; box-sizing: border-box; padding: 2px 6px; border: 1px solid #dadce0;
       border-radius: 6px; font: inherit; font-size: 12px; font-family: ui-monospace, monospace; color: inherit; }
   `;
@@ -341,6 +349,7 @@ globalThis.CompassPeriodUI = (() => {
     let editDay = "all";    // "all" (Monday to Friday) or "1" … "5"
     let tried = false;      // Save was clicked with a row that isn't valid
     let share = null;       // null, or { mode: "copy"|"paste", text, msg, ok } for the share row
+    let newsHelp = false;   // the "Share with all staff (News post)" steps are open
     let ticksDraft = "hours";
 
     const rowsOf = () => (editDay === "all" ? draft.all : draft.days[editDay]);
@@ -426,7 +435,8 @@ globalThis.CompassPeriodUI = (() => {
           }
         }
       }
-      if (source === "custom") panel.append(shareRow());
+      if (source === "custom") panel.append(shareRow(), newsHelpLink());
+      if (source === "custom" && newsHelp) panel.append(newsHelpBox());
       panel.append(el("div", "ynote", "Times on the timeline"));
       panel.append(segOf([["hours", "Hours", "A label on each hour"], ["starts", "Period starts", "A label at the start of each period, and at the end of the day"]],
         ticksDraft, (v) => { ticksDraft = v; drawSetup(); }));
@@ -440,6 +450,35 @@ globalThis.CompassPeriodUI = (() => {
       actions.append(save, cancel);
       if (tried) actions.append(el("span", "err", "Each period needs a name, and a finish after its start."));
       panel.append(actions);
+    }
+
+    // How an admin shares the timetable with all staff through one Compass News post
+    // (docs/SCHOOL_TIMETABLE_POST.md has the same steps).
+    function newsHelpLink() {
+      const b = el("button", "link", newsHelp ? "Hide the News post steps" : "Share with all staff (News post)");
+      b.type = "button";
+      b.setAttribute("aria-expanded", String(newsHelp));
+      b.onclick = () => { newsHelp = !newsHelp; drawSetup(); };
+      return b;
+    }
+    function newsHelpBox() {
+      const box = el("div", "newshelp");
+      box.append(el("p", null, "One staff-only news post shares the school's timetable with every staff member's widget."),
+        el("p", "soon", "Coming soon: the widget can't read the post yet. Until then, use Copy timetable code."));
+      const li = (...parts) => { const e = el("li"); e.append(...parts); return e; };
+      const ol = el("ol");
+      const sub = el("ul");
+      for (const t of ["Title: Period timetable", "Body: paste the code on its own line", "Audience: staff only",
+        "Email and notifications: off", "Finish date: yesterday, so it never shows in the feed"]) sub.append(li(t));
+      ol.append(
+        li("Set up the timetable above, then click Copy timetable code."),
+        li("In Compass News, create a post:", sub),
+        li("To change the timetable, edit the same post and paste the new code. Don't make a second post."),
+        li("To stop sharing, delete the post."),
+      );
+      box.append(ol, el("p", null, "The code holds only period names and times."));
+      box.lastChild.style.margin = "4px 0 0";
+      return box;
     }
 
     // Copy this timetable as a code for colleagues, or paste a colleague's code.
@@ -535,6 +574,7 @@ globalThis.CompassPeriodUI = (() => {
         editDay = draft.days[today] ? String(today) : "all";
         tried = false;
         share = null;
+        newsHelp = false;
         ticksDraft = tickMode;
         drawSetup();
       }
