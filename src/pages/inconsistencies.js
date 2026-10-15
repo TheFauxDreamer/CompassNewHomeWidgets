@@ -107,6 +107,29 @@
     .legend .sw.flag { outline: 2px solid #B3261E; outline-offset: 1px; background: #fff; }
     .empty { color: #5f6368; text-align: center; padding: 24px 0; }
   `;
+  // Printing: only the results, with a heading that says what was printed. The codes keep
+  // their colours, and a row or a day's heading never splits across pages.
+  const PRINT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3m-3 11H8v-5h8zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1m-1-9H6v4h12z"/></svg>';
+  const PRINT_CSS = `
+    .printonly { display: none; }
+    @media print {
+      :host { position: static; overflow: visible; background: #fff; }
+      .wrap { max-width: none; padding: 0; }
+      a.back, .controls, .loader, #status:empty, .noprint { display: none !important; }
+      .printonly { display: block; }
+      .card { box-shadow: none; border: 1px solid #dadce0; padding: 10px 12px; margin-bottom: 10px; break-inside: auto; }
+      #head { border: 0; padding: 0 0 6px; }
+      .printhead h1 { font-size: 18px; margin: 0 0 2px; }
+      .printhead p { margin: 0; color: #3E4B62; font-size: 12px; }
+      h2 { break-after: avoid; }
+      tr, tbody.stu { break-inside: avoid; }
+      thead { display: table-header-group; }
+      td.name a { color: #203249; }
+      td.name, td.date, td.name .who, td.date .who { white-space: normal; }
+      .mark, .legend .sw { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      tr:hover td { background: none; }
+    }
+  `;
   // Text colour for each category's background (CATEGORIES colours), for contrast.
   const INK = { present: "#fff", offsite: "#203249", approved: "#203249", unapproved: "#fff", unmarked: "#203249" };
 
@@ -126,18 +149,26 @@
   host.id = "compass-inconsistencies-page";
   document.documentElement.append(host);
   document.body.style.overflow = "hidden"; // only our page scrolls
+  const printStyle = document.createElement("style");
+  printStyle.textContent = `@media print {
+    body { display: none !important; }
+    html, #compass-inconsistencies-page { overflow: visible !important; height: auto !important; }
+    @page { margin: 12mm; }
+  }`;
+  document.head.append(printStyle);
   const setTitle = () => { if (document.title !== `${TITLE} | Compass`) document.title = `${TITLE} | Compass`; };
   setTitle();
   setTimeout(setTitle, 2000); // Compass sets its own title as it starts
 
   const root = host.attachShadow({ mode: "open" });
   root.innerHTML = `
-    <style>${CSS}${Y.CSS}${PAGE_CSS}</style>
+    <style>${CSS}${Y.CSS}${PAGE_CSS}${PRINT_CSS}</style>
     <div class="wrap">
       <a class="back" href="/">← Back to Compass</a>
-      <div class="card">
+      <div class="card controls">
         <header>
           <h1>${TITLE}</h1>
+          <button id="print" title="Print the results">${PRINT_ICON}</button>
           <button id="refresh" title="Load again">${ICONS.refresh}</button>
         </header>
         <p class="intro">Students who are marked both present and absent on the same day across the rolls,
@@ -170,6 +201,7 @@
         <div class="yarea" id="yarea"></div>
       </div>
       <div class="card" id="head">
+        <div class="printonly printhead"><h1>${TITLE}</h1><p id="printinfo"></p></div>
         <div class="summary" id="summary">Loading…</div>
         <div class="loader" id="loader" hidden>
           <div class="ltop"><b id="lpct">0%</b><span id="lrolls"></span><span class="time" id="ltime"></span>
@@ -644,6 +676,18 @@
   }
 
   $("stop").onclick = () => { stopRequested = true; again = false; drawLoader(); };
+  // The print heading: what was printed (range, settings and filter) and when.
+  function printInfo() {
+    const dates = rangeDates();
+    const span = range === "today" ? `Today, ${fmtLong(fmt(dates[0]))}` : `${RANGES[range][0][0].toUpperCase()}${RANGES[range][0].slice(1)} (${fmtShort(fmt(dates[0]))} to ${fmtShort(fmt(dates[dates.length - 1]))})`;
+    const filter = G.isGroups(years) ? G.label(years) : Array.isArray(years) ? (years.length ? Y.label(years) : "No year groups") : "All year groups";
+    const parts = [span, filter, rule === "any" ? "Any mix" : "Absent between presents", absences === "all" ? "All absences" : "Unapproved absences"];
+    if (busy) parts.push("Still loading: some days may be missing");
+    parts.push(`Printed ${new Date().toLocaleString("en-AU", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}`);
+    $("printinfo").textContent = parts.join(" · ");
+  }
+  window.addEventListener("beforeprint", printInfo); // also for the browser's own Print command
+  $("print").onclick = () => { printInfo(); window.print(); };
   $("refresh").onclick = () => load({ fresh: true });
   drawLegend();
   const offNames = N.onChange(() => draw());
