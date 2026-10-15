@@ -372,7 +372,7 @@ Do not only delete the lines that have the comment `DEBUG`. Other lines use the 
 
 ## Show test names
 
-For demonstrations and screenshots, the widgets can show Final Fantasy VII names instead of the real names of students, staff and Custom Groups.
+For demonstrations and screenshots, the widgets can show Final Fantasy names instead of the real names of students, staff and Custom Groups.
 Only the names on the screen change. The widgets still use the real data.
 
 1. Open `src/shared/names.js`.
@@ -390,7 +390,7 @@ Set `TEST_NAMES` back to `false` before you release the extension.
 | `manifest.json` | The extension settings and the list of scripts, in load order. |
 | `src/shared/years.js` | The year-group order, the year-group labels and the filter chip. All widgets use this file. The Recent Chronicle widget also uses the filter chip for entry types. |
 | `src/shared/groups.js` | The Compass Custom Groups for the Attendance, Arrivals & Departures and Recent Chronicle filters. |
-| `src/shared/names.js` | The test names (Final Fantasy VII names instead of real names). |
+| `src/shared/names.js` | The test names (Final Fantasy names instead of real names). |
 | `src/shared/periods.js` | The periods of a school day (custom timetable) for the Current Period widget. |
 | `src/shared/theme.js` | The base look (`CompassTheme.CSS`) and the icons (`CompassTheme.ICONS`) for all widgets. |
 | `src/widgets/attendance/data.js` | Gets the attendance data from Compass and counts it. Contains the list of attendance codes. |

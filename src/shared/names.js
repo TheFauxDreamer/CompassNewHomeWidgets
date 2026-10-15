@@ -1,4 +1,4 @@
-// Test names: shows Final Fantasy VII names instead of the real names of students,
+// Test names: shows Final Fantasy names (mostly VII and XIII) instead of the real names of students,
 // staff and Custom Groups, for demos and screenshots. Only the names on the screen
 // change; the widgets still get and filter the real data.
 //
@@ -12,10 +12,31 @@ globalThis.CompassNames = (() => {
   const PEOPLE = [
     "Cloud Strife", "Tifa Lockhart", "Aerith Gainsborough", "Barret Wallace", "Red XIII", "Yuffie Kisaragi",
     "Cid Highwind", "Vincent Valentine", "Cait Sith", "Reno", "Rude", "Elena",
+    "Zack Fair", "Marlene Wallace", "Jessie Rasberry", "Biggs", "Wedge", "Reeve Tuesti",
+    // Final Fantasy XIII
+    "Lightning Farron", "Snow Villiers", "Serah Farron", "Oerba Dia Vanille", "Oerba Yun Fang", "Sazh Katzroy",
+    "Hope Estheim", "Dajh Katzroy", "Nora Estheim", "Cid Raines", "Jihl Nabaat", "Yaag Rosch",
+    "Lebreau", "Gadot", "Maqui", "Yuj", "Rygdea", "Bartholomew Estheim",
+    // Final Fantasy IV, VI, VIII, IX, X, XII, XV and XVI
+    "Cecil Harvey", "Rosa Farrell", "Kain Highwind", "Rydia", "Edward Chris von Muir", "Edge Geraldine",
+    "Terra Branford", "Locke Cole", "Celes Chere", "Edgar Figaro", "Sabin Figaro", "Setzer Gabbiani",
+    "Squall Leonhart", "Rinoa Heartilly", "Quistis Trepe", "Zell Dincht", "Selphie Tilmitt", "Irvine Kinneas",
+    "Zidane Tribal", "Garnet Til Alexandros", "Adelbert Steiner", "Vivi Ornitier", "Freya Crescent", "Eiko Carol",
+    "Tidus", "Yuna", "Wakka", "Lulu", "Kimahri Ronso", "Rikku",
+    "Vaan", "Ashelia B'nargin Dalmasca", "Balthier", "Fran", "Basch fon Ronsenburg", "Penelo",
+    "Noctis Lucis Caelum", "Gladiolus Amicitia", "Ignis Scientia", "Prompto Argentum", "Iris Amicitia", "Cindy Aurum",
+    "Clive Rosfield", "Jill Warrick", "Joshua Rosfield", "Torgal", "Cidolfus Telamon", "Mid Telamon",
   ];
   const GROUPS = [
     "AVALANCHE", "Turks", "Shinra", "Sector 7", "Seventh Heaven", "Mako Reactor 1",
     "Midgar Academy", "Kalm", "Junon", "Wutai", "Cosmo Canyon", "Nibelheim",
+    // Final Fantasy XIII
+    "NORA", "Guardian Corps", "Sanctum", "Cavalry", "Bodhum", "Palumpolum",
+    "Nautilus", "Eden", "Oerba", "Lake Bresha", "Vile Peaks", "Sunleth Waterscape",
+    // Final Fantasy IV, VI, VIII, IX, X, XII, XV and XVI
+    "Baron", "Mysidia", "Figaro", "Narshe", "Balamb Garden", "SeeD",
+    "Alexandria", "Lindblum", "Besaid", "Zanarkand", "Rabanastre", "Archadia",
+    "Insomnia", "Lestallum", "Altissia", "Rosaria", "The Hideaway", "Sanbreque",
   ];
   const ROMAN = ["II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 
