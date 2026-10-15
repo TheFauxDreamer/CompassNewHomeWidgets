@@ -840,9 +840,10 @@ globalThis.CompassAttendance = (() => {
   //   rule "any":     at least one present mark and at least one absent mark.
   // Gives [{ userId, name, yearLevelString, date, periods, mode, statuses, flagged }], newest
   // day first, then by year group (in school order), then by name: the first name (order "first",
-  // the name as Compass writes it) or the surname (order "last"). flagged: the indexes of the
-  // absences that made the match.
-  function inconsistencies(days, { rule = "between", absences = "unapproved", order = "first" } = {}) {
+  // the name as Compass writes it) or the surname (order "last"). With groupBy "student" the
+  // rows come by year group, then by name, with each student's days together (newest first).
+  // flagged: the indexes of the absences that made the match.
+  function inconsistencies(days, { rule = "between", absences = "unapproved", order = "first", groupBy = "day" } = {}) {
     const isPresent = (c) => c === "present" || c === "offsite";
     const isAbsent = (c) => c === "unapproved" || (absences === "all" && c === "approved");
     const out = [];
@@ -861,8 +862,11 @@ globalThis.CompassAttendance = (() => {
     const surname = (r) => r.lastName || r.name.split(/\s+/).pop() || "";
     const byName = (a, b) => (order === "last" ? surname(a).localeCompare(surname(b), "en", { sensitivity: "base" }) : 0)
       || a.name.localeCompare(b.name, "en", { sensitivity: "base" });
-    return out.sort((a, b) => b.date.localeCompare(a.date) || rank(yearOf(a)) - rank(yearOf(b))
-      || yearOf(a).localeCompare(yearOf(b)) || byName(a, b));
+    const byYear = (a, b) => rank(yearOf(a)) - rank(yearOf(b)) || yearOf(a).localeCompare(yearOf(b));
+    const byDate = (a, b) => b.date.localeCompare(a.date);
+    return out.sort(groupBy === "student"
+      ? (a, b) => byYear(a, b) || byName(a, b) || a.userId - b.userId || byDate(a, b)
+      : (a, b) => byDate(a, b) || byYear(a, b) || byName(a, b));
   }
 
   // --- trend (the "Attendance Trend" widget) -----------------------------------------------

@@ -18,6 +18,7 @@
   const RANGES = { today: ["today", 1], history: ["the last 2 weeks", 14], month: ["the last month", null] };
   const RULE_KEY = "inconsistencyRule";         // "between" | "any"
   const ABSENCES_KEY = "inconsistencyAbsences"; // "unapproved" | "all"
+  const GROUP_KEY = "inconsistencyGroup";       // "day" | "student": how several days show
   const ORDER_KEY = "inconsistencyOrder";       // "first" | "last": sort by first name or surname
   const YEARS_KEY = "inconsistencyYears";       // array of year names; null = all; or a group selection (groups.js)
 
@@ -37,6 +38,7 @@
     .intro { color: #3E4B62; margin: 4px 0 12px; max-width: 760px; }
     .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
     .tools .group { display: inline-flex; align-items: center; gap: 6px; color: #5f6368; font-size: 12px; }
+    .tools .group[hidden] { display: none; }
     .seg button { color: #3E4B62; padding: 3px 10px; }
     .seg button[aria-pressed="true"] { color: #fff; }
     .yrow { margin: 0; }
@@ -76,6 +78,14 @@
     table { border-collapse: collapse; width: 100%; table-layout: fixed; font: inherit; color: inherit; }
     col.year { width: 160px; }
     col.p { width: 64px; }
+    col.date { width: 220px; }
+    td.date { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    td.date .who { color: #5f6368; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    td.date .who b { color: #3E4B62; font-weight: 600; }
+    td.date .who.err { color: #b3261e; }
+    td.name .days { color: #5f6368; font-size: 12px; }
+    td.name[rowspan] { vertical-align: top; }
+    tbody.stu tr:last-child td, tbody.stu td[rowspan] { border-bottom: 2px solid #dadce0; }
     td.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     td.name .who { color: #5f6368; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     td.name .who b { color: #3E4B62; font-weight: 600; }
@@ -144,6 +154,10 @@
             <button data-v="between" title="An absence with a present mark before it and after it on the same day">Absent between presents</button>
             <button data-v="any" title="Any day with both a present mark and an absent mark (also late arrivals and early departures)">Any mix</button>
           </span></span>
+          <span class="group" id="groupWrap">Group <span class="seg" id="groupBy">
+            <button data-v="day" title="One table for each day">By day</button>
+            <button data-v="student" title="One table for each year group, with each student's days together">By student</button>
+          </span></span>
           <span class="group">Sort <span class="seg" id="order">
             <button data-v="first" title="Within each year group, by first name">First name</button>
             <button data-v="last" title="Within each year group, by surname">Surname</button>
@@ -176,7 +190,7 @@
   N.attach(root);
 
   // --- state ---------------------------------------------------------------------------------
-  let range = "today", rule = "between", absences = "unapproved", order = "first", years = null;
+  let range = "today", rule = "between", absences = "unapproved", order = "first", groupBy = "day", years = null;
   const loaded = new Map();   // "yyyy/mm/dd" -> day from loadInconsistencyRange
   const failed = new Map();   // "yyyy/mm/dd" -> error text
   let busy = false, again = false, error = "", lastUpdated = null;
@@ -213,6 +227,7 @@
   const showRule = seg("rule", () => rule, (v, fromUser) => { rule = v === "any" ? "any" : "between"; if (fromUser) save(RULE_KEY, rule); draw(); });
   const showAbsences = seg("absences", () => absences, (v, fromUser) => { absences = v === "all" ? "all" : "unapproved"; if (fromUser) save(ABSENCES_KEY, absences); draw(); });
   const showOrder = seg("order", () => order, (v, fromUser) => { order = v === "last" ? "last" : "first"; if (fromUser) save(ORDER_KEY, order); draw(); });
+  const showGroup = seg("groupBy", () => groupBy, (v, fromUser) => { groupBy = v === "student" ? "student" : "day"; if (fromUser) save(GROUP_KEY, groupBy); draw(); });
   seg("range", () => range, (v) => { range = v in RANGES ? v : "today"; load(); draw(); });
 
   // The dates of the range, oldest first. Days with no school are dropped as they load.
@@ -287,7 +302,7 @@
     if (students === null) { $("summary").textContent = `Loading ${G.label(years)}…`; return; }
     const allowed = new Set(students);
     const shown = days.map((d) => ({ ...d, students: d.students.filter((s) => allowed.has(s)) }));
-    const rows = A.inconsistencies(shown, { rule, absences, order }).map((r) => ({ ...r, name: N.person(r.name) || `Student ${r.userId}` }));
+    const rows = A.inconsistencies(shown, { rule, absences, order, groupBy: byStudent() ? "student" : "day" }).map((r) => ({ ...r, name: N.person(r.name) || `Student ${r.userId}` }));
 
     // Summary: students and student-days found.
     const s = $("summary");
@@ -304,58 +319,122 @@
     note.hidden = !(amPmOnly && rule === "between");
     note.textContent = note.hidden ? "" : "This school marks only AM and PM rolls, so no absence can be between two presents. Use \"Any mix\" to see students present for one half and absent for the other.";
 
+    $("groupWrap").hidden = range === "today";
     results.textContent = "";
-    const byDate = new Map();
-    for (const r of rows) { if (!byDate.has(r.date)) byDate.set(r.date, []); byDate.get(r.date).push(r); }
     if (!rows.length && days.length) {
       const card = el("div", "card");
       card.append(el("div", "empty", "No inconsistencies for these students and settings."));
       results.append(card);
     }
-    for (const [date, list] of byDate) {
+    if (byStudent()) drawByStudent(rows);
+    else drawByDay(rows);
+    queueMarks(rows);
+    drawStatus();
+  }
+
+  // --- the tables ------------------------------------------------------------------------------
+  const byStudent = () => range !== "today" && groupBy === "student";
+
+  // Rows grouped by a key, in their order: [[key, [rows]]].
+  function groupRows(rows, keyOf) {
+    const groups = new Map();
+    for (const r of rows) { const k = keyOf(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+    return [...groups];
+  }
+
+  // A table with a fixed layout: firstCols = [[header, col class]], then one column per period.
+  function table(firstCols, periods) {
+    const t = el("table");
+    const cols = el("colgroup");
+    cols.append(...firstCols.map(([, cls]) => el("col", cls)), ...periods.map(() => el("col", "p")));
+    const head = el("tr");
+    for (const [text] of firstCols) head.append(el("th", null, text));
+    for (const p of periods) {
+      const th = el("th", "p", p.name);
+      th.title = `${p.name} · ${fmtTime(p.start)}–${fmtTime(p.finish)}`;
+      head.append(th);
+    }
+    const thead = el("thead");
+    thead.append(head);
+    t.append(cols, thead);
+    return t;
+  }
+
+  function studentLink(r) {
+    const link = el("a", null, r.name);
+    link.href = `/Records/User.aspx?userId=${encodeURIComponent(r.userId)}`;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.title = "Open the student's profile in Compass";
+    return link;
+  }
+
+  // One cell for each of `count` columns: the row's marks, then empty cells (a day with fewer periods).
+  function markCells(tr, r, count) {
+    const flagged = new Set(r.flagged);
+    const known = marks.get(markKey(r));
+    for (let i = 0; i < count; i++) {
+      const td = el("td", "p");
+      const p = r.periods[i];
+      if (p) td.append(mark(r.statuses[i], p, flagged.has(i), known?.state === "done" ? known.list[i] ?? null : known?.state === "fail" ? null : undefined));
+      tr.append(td);
+    }
+  }
+
+  // By day: one card for each day, newest first.
+  function drawByDay(rows) {
+    for (const [date, list] of groupRows(rows, (r) => r.date)) {
       const card = el("div", "card");
       const h = el("h2", null, fmtLong(date));
       h.append(el("span", "n", plural(list.length, "student")));
-      const table = el("table");
       const periods = list[0].periods;
-      const cols = el("colgroup");
-      cols.append(el("col"), el("col", "year"), ...periods.map(() => el("col", "p")));
-      table.append(cols);
-      const head = el("tr");
-      head.append(el("th", null, "Student"), el("th", null, "Year"));
-      for (const p of periods) {
-        const th = el("th", "p", p.name);
-        th.title = `${p.name} · ${fmtTime(p.start)}–${fmtTime(p.finish)}`;
-        head.append(th);
-      }
-      const thead = el("thead");
-      thead.append(head);
+      const t = table([["Student"], ["Year", "year"]], periods);
       const tbody = el("tbody");
       for (const r of list) {
         const tr = el("tr");
         const name = el("td", "name");
-        const link = el("a", null, r.name);
-        link.href = `/Records/User.aspx?userId=${encodeURIComponent(r.userId)}`;
-        link.target = "_blank";
-        link.rel = "noopener";
-        link.title = "Open the student's profile in Compass";
-        name.append(link, whoLine(r));
+        name.append(studentLink(r), whoLine(r));
         tr.append(name, el("td", "year", r.yearLevelString || "No year level"));
-        const flagged = new Set(r.flagged);
-        const known = marks.get(markKey(r));
-        periods.forEach((p, i) => {
-          const td = el("td", "p");
-          td.append(mark(r.statuses[i], p, flagged.has(i), known?.state === "done" ? known.list[i] ?? null : known?.state === "fail" ? null : undefined));
-          tr.append(td);
-        });
+        markCells(tr, r, periods.length);
         tbody.append(tr);
       }
-      table.append(thead, tbody);
-      card.append(h, table);
-      results.append(card);
+      t.append(tbody);
+      card.append(h, t);
+      $("results").append(card);
     }
-    queueMarks(rows);
-    drawStatus();
+  }
+
+  // By student: one card for each year group; each student once, with their days stacked.
+  // The period columns come from the day with the most periods in the card.
+  function drawByStudent(rows) {
+    for (const [year, list] of groupRows(rows, (r) => r.yearLevelString || "No year level")) {
+      const card = el("div", "card");
+      const people = groupRows(list, (r) => r.userId);
+      const h = el("h2", null, year);
+      h.append(el("span", "n", `${plural(people.length, "student")} · ${plural(list.length, "day")}`));
+      const periods = list.reduce((a, r) => (r.periods.length > a.length ? r.periods : a), []);
+      const t = table([["Student"], ["Day", "date"]], periods);
+      for (const [, mine] of people) {
+        const tbody = el("tbody", "stu");
+        mine.forEach((r, n) => {
+          const tr = el("tr");
+          if (!n) {
+            const name = el("td", "name");
+            name.rowSpan = mine.length;
+            name.append(studentLink(r), el("div", "days", plural(mine.length, "day")));
+            tr.append(name);
+          }
+          const date = el("td", "date", fmtShort(r.date));
+          date.append(whoLine(r));
+          tr.append(date);
+          markCells(tr, r, periods.length);
+          tbody.append(tr);
+        });
+        t.append(tbody);
+      }
+      card.append(h, t);
+      $("results").append(card);
+    }
   }
 
   // --- who marked the flagged periods ----------------------------------------------------------
@@ -571,7 +650,9 @@
   window.addEventListener("pagehide", offNames);
 
   try {
-    chrome.storage.local.get([RULE_KEY, ABSENCES_KEY, ORDER_KEY, YEARS_KEY], (r) => {
+    chrome.storage.local.get([RULE_KEY, ABSENCES_KEY, ORDER_KEY, GROUP_KEY, YEARS_KEY], (r) => {
+      groupBy = r?.[GROUP_KEY] === "student" ? "student" : "day";
+      showGroup();
       order = r?.[ORDER_KEY] === "last" ? "last" : "first";
       showOrder();
       rule = r?.[RULE_KEY] === "any" ? "any" : "between";

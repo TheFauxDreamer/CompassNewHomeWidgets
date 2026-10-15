@@ -200,3 +200,15 @@ test("order = last sorts each year group by surname", () => {
   assert.deepEqual(A.inconsistencies(days).map((r) => r.name), ["Aerith Gainsborough", "Barret Wallace", "Tifa Lockhart", "Vincent Valentine"]);
   assert.deepEqual(A.inconsistencies(days, { order: "last" }).map((r) => r.name), ["Aerith Gainsborough", "Tifa Lockhart", "Vincent Valentine", "Barret Wallace"]);
 });
+
+test("groupBy = student puts each student's days together, by year group then name", () => {
+  const gap = ["pres", "abs", "pres"];
+  const inYear = (s, year) => ({ ...s, yearLevelString: year });
+  const days = [
+    day([inYear(student(1, "Rude", gap), "Year 3"), inYear(student(2, "Elena", gap), "Year 1")], PERIODS, "2026/10/13"),
+    day([inYear(student(1, "Rude", gap), "Year 3"), inYear(student(3, "Reno", gap), "Year 3")]),
+  ];
+  assert.deepEqual(A.inconsistencies(days, { groupBy: "student" }).map((r) => [r.name, r.date]), [
+    ["Elena", "2026/10/13"], ["Reno", WED], ["Rude", WED], ["Rude", "2026/10/13"],
+  ]);
+});
