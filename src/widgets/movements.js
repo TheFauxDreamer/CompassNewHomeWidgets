@@ -94,11 +94,14 @@ globalThis.CompassMovements = (() => {
 
   // Gets the raw rows and the year-level names. The widget runs summarise() itself, so a change
   // to the year filter does not send a new request to Compass.
-  async function load(now = new Date()) {
+  // since: a Date to page back to instead of the start of today (the Period inconsistencies page
+  // uses the start of its range). Then up to MAX_PAGES_SINCE pages are read.
+  const MAX_PAGES_SINCE = 60;
+  async function load(now = new Date(), { since = null } = {}) {
     const yearNames = fetchYearNames();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfToday = since || new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const items = [];
-    for (let page = 1; page <= MAX_PAGES; page++) {
+    for (let page = 1; page <= (since ? MAX_PAGES_SINCE : MAX_PAGES); page++) {
       const json = await post("/Services/Attendance.svc/GetArrivalsAndDepartures?sessionstate=readonly", {
         fromFilter: null, toFilter: null, typeFilter: null, filter: "[]", page, start: (page - 1) * PAGE_SIZE, limit: PAGE_SIZE,
       });
@@ -113,7 +116,7 @@ globalThis.CompassMovements = (() => {
     return { items, now, yearNames: await yearNames };
   }
 
-  return { load, summarise, displayName, reasonText, REFRESH_MINUTES, NEW_MINUTES };
+  return { load, summarise, displayName, reasonText, parseDate, REFRESH_MINUTES, NEW_MINUTES };
 })();
 
 globalThis.CompassMovementsUI = (() => {

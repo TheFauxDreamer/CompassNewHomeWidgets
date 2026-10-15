@@ -212,3 +212,63 @@ test("groupBy = student puts each student's days together, by year group then na
     ["Elena", "2026/10/13"], ["Reno", WED], ["Rude", WED], ["Rude", "2026/10/13"],
   ]);
 });
+
+test("present between absences flags the present mark (a likely marking mistake)", () => {
+  const days = [day([
+    student(1, "Cloud Strife", ["abs", "pres", "abs", "abs"]),   // present only in P2
+    student(2, "Tifa Lockhart", ["pres", "abs", "pres", "pres"]), // the usual pattern: not this rule
+    student(3, "Barret Wallace", ["sick", "exc", "abs", "abs"]),  // approved before: only with absences = all
+  ])];
+  assert.deepEqual(found(A.inconsistencies(days, { rule: "present" })), [["Cloud Strife", [1]]]);
+  assert.deepEqual(found(A.inconsistencies(days, { rule: "present", absences: "all" })), [["Barret Wallace", [1]], ["Cloud Strife", [1]]]);
+});
+
+test("offsiteSpans: late arrival, out and back, out for the rest of the day", () => {
+  const ev = (type, h, m = 0) => ({ type, time: at(h, m) });
+  const t = (h, m = 0) => at(h, m).getTime();
+  assert.deepEqual(A.offsiteSpans([ev("arrival", 10, 5)]), [{ from: -Infinity, to: t(10, 5) }]);
+  assert.deepEqual(A.offsiteSpans([ev("arrival", 12), ev("departure", 10)]), [{ from: t(10), to: t(12) }]); // any order
+  assert.deepEqual(A.offsiteSpans([ev("departure", 13, 20)]), [{ from: t(13, 20), to: Infinity }]);
+  assert.deepEqual(A.offsiteSpans([]), []);
+});
+
+test("explainedBy: a sign-out that covers every flagged absence explains the day", () => {
+  const [row] = A.inconsistencies([day([student(1, "Cloud Strife", ["pres", "pres", "abs", "pres"])])]); // P3 11:30-12:30
+  assert.equal(A.explainedBy(row, [{ type: "departure", time: at(11, 15) }, { type: "arrival", time: at(12, 45) }]).explained, true);
+  assert.equal(A.explainedBy(row, [{ type: "departure", time: at(9, 50) }, { type: "arrival", time: at(10, 30) }]).explained, false); // back before P3
+  assert.equal(A.explainedBy(row, []).explained, false);
+  assert.equal(A.explainedBy(row, [{ type: "departure", time: at(11, 15) }], "present").explained, false);
+});
+
+test("summariseInconsistencies counts students, periods, weekdays and classes", () => {
+  const rows = A.inconsistencies([
+    day([student(1, "Cloud Strife", ["pres", "abs", "pres", "pres"]), student(2, "Tifa Lockhart", ["pres", "abs", "abs", "pres"])]), // Wed
+    day([student(1, "Cloud Strife", ["pres", "abs", "pres", "pres"])], PERIODS, "2026/10/12"), // Mon
+  ]);
+  const markings = new Map([[`1|${WED}`, [null, { className: "Seventh Heaven", teacher: "cstrife" }, null, null]]]);
+  const s = A.summariseInconsistencies(rows, markings);
+  assert.deepEqual(s.students.map((x) => [x.name, x.days, x.marks, x.last]), [["Cloud Strife", 2, 2, WED], ["Tifa Lockhart", 1, 2, WED]]);
+  assert.deepEqual(s.periods, [{ name: "P2", count: 3 }, { name: "P3", count: 1 }]);
+  assert.deepEqual(s.weekdays, [{ name: "Monday", count: 1 }, { name: "Wednesday", count: 3 }]);
+  assert.deepEqual(s.classes, [{ name: "Seventh Heaven", teacher: "cstrife", count: 1 }]);
+  assert.deepEqual([s.marks, s.pending], [4, 2]);
+});
+
+test("CompassMovements.load pages back to `since`", async () => {
+  load("src/widgets/movements.js");
+  const M = globalThis.CompassMovements;
+  const now = new Date(2026, 9, 14, 12, 0); // the same day as at()
+  const row = (d) => ({ id: d.getTime(), uid: 1, ct: 2, t: d.toISOString() });
+  // Newest first: page 1 is today, page 2 the day before, page 3 a week ago.
+  const pages = [[row(at(10)), row(at(9))], [row(new Date(2026, 9, 13, 10))], [row(new Date(2026, 9, 7, 10))], [row(new Date(2026, 8, 1, 10))]];
+  const calls = mockFetch({
+    GetStudentYearLevels: () => ({ d: [] }),
+    GetArrivalsAndDepartures: (body) => ({ d: { total: 99, data: pages[body.page - 1] || [] } }),
+  });
+  const today = await M.load(now);
+  assert.equal(today.items.length, 3); // stops at the first page with a row from before today
+  calls.length = 0;
+  const range = await M.load(now, { since: new Date(2026, 9, 8) });
+  assert.equal(range.items.length, 4); // reads until a row is older than `since`
+  assert.equal(calls.filter((c) => c.url.includes("GetArrivalsAndDepartures")).length, 3);
+});

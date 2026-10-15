@@ -16,9 +16,11 @@
   const TITLE = "Period inconsistencies";
   // The ranges: [label, days back]. "month" is one calendar month back from today (null here).
   const RANGES = { today: ["today", 1], history: ["the last 2 weeks", 14], month: ["the last month", null] };
-  const RULE_KEY = "inconsistencyRule";         // "between" | "any"
+  const RULE_KEY = "inconsistencyRule";         // "between" | "any" | "present"
   const ABSENCES_KEY = "inconsistencyAbsences"; // "unapproved" | "all"
   const GROUP_KEY = "inconsistencyGroup";       // "day" | "student": how several days show
+  const SIGNOUTS_KEY = "inconsistencySignouts"; // "show" | "hide": days that a sign-out or late arrival explains
+  const VIEW_KEY = "inconsistencyView";         // "list" | "summary"
   const ORDER_KEY = "inconsistencyOrder";       // "first" | "last": sort by first name or surname
   const YEARS_KEY = "inconsistencyYears";       // array of year names; null = all; or a group selection (groups.js)
 
@@ -84,6 +86,17 @@
     td.date .who b { color: #3E4B62; font-weight: 600; }
     td.date .who.err { color: #b3261e; }
     td.name .days { color: #5f6368; font-size: 12px; }
+    .mv { color: #3E4B62; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .okchip { display: inline-block; margin-right: 6px; padding: 0 7px; border-radius: 999px; background: #E6F4EA; color: #1E6B34;
+      font-size: 11px; font-weight: 600; }
+    /* Summary */
+    .sumgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 0 16px; }
+    .sumgrid .card { margin-bottom: 16px; }
+    td.num, th.num { text-align: right; width: 64px; font-variant-numeric: tabular-nums; }
+    td.barcell { width: 40%; }
+    .bar { height: 10px; border-radius: 3px; background: #0E6CD9; min-width: 2px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    td.sub { color: #5f6368; }
+    .more { color: #5f6368; font-size: 12px; margin-top: 6px; }
     td.name[rowspan] { vertical-align: top; }
     tbody.stu tr:last-child td, tbody.stu td[rowspan] { border-bottom: 2px solid #dadce0; }
     td.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -184,6 +197,15 @@
           <span class="group">Show <span class="seg" id="rule">
             <button data-v="between" title="An absence with a present mark before it and after it on the same day">Absent between presents</button>
             <button data-v="any" title="Any day with both a present mark and an absent mark (also late arrivals and early departures)">Any mix</button>
+            <button data-v="present" title="A present mark with an absence before it and after it on the same day. This is usually a marking mistake, so the line under the name shows who saved that roll.">Present between absences</button>
+          </span></span>
+          <span class="group">View <span class="seg" id="view">
+            <button data-v="list" title="The students and their marks">List</button>
+            <button data-v="summary" title="The most flagged students, and the periods, days and classes with the most flagged marks">Summary</button>
+          </span></span>
+          <span class="group" id="signoutsWrap">Sign-outs <span class="seg" id="signouts">
+            <button data-v="show" title="Show every flagged day, with a note when the student signed out or arrived late">Show</button>
+            <button data-v="hide" title="Hide the days where a sign-out or a late arrival in Arrivals &amp; Departures covers every flagged absence">Hide explained</button>
           </span></span>
           <span class="group" id="groupWrap">Group <span class="seg" id="groupBy">
             <button data-v="day" title="One table for each day">By day</button>
@@ -222,7 +244,9 @@
   N.attach(root);
 
   // --- state ---------------------------------------------------------------------------------
-  let range = "today", rule = "between", absences = "unapproved", order = "first", groupBy = "day", years = null;
+  let range = "today", rule = "between", absences = "unapproved", order = "first", groupBy = "day", signouts = "show", view = "list", years = null;
+  // Arrivals and departures of the range: "uid|yyyy/mm/dd" -> [{ type, time, reason, minutesLate, by }], oldest first.
+  let moves = new Map(), movesError = "";
   const loaded = new Map();   // "yyyy/mm/dd" -> day from loadInconsistencyRange
   const failed = new Map();   // "yyyy/mm/dd" -> error text
   let busy = false, again = false, error = "", lastUpdated = null;
@@ -256,7 +280,10 @@
     show();
     return show;
   }
-  const showRule = seg("rule", () => rule, (v, fromUser) => { rule = v === "any" ? "any" : "between"; if (fromUser) save(RULE_KEY, rule); draw(); });
+  const validRule = (v) => (v === "any" || v === "present" ? v : "between");
+  const showRule = seg("rule", () => rule, (v, fromUser) => { rule = validRule(v); if (fromUser) save(RULE_KEY, rule); drawLegend(); draw(); });
+  const showSignouts = seg("signouts", () => signouts, (v, fromUser) => { signouts = v === "hide" ? "hide" : "show"; if (fromUser) save(SIGNOUTS_KEY, signouts); draw(); });
+  const showView = seg("view", () => view, (v, fromUser) => { view = v === "summary" ? "summary" : "list"; if (fromUser) save(VIEW_KEY, view); draw(); });
   const showAbsences = seg("absences", () => absences, (v, fromUser) => { absences = v === "all" ? "all" : "unapproved"; if (fromUser) save(ABSENCES_KEY, absences); draw(); });
   const showOrder = seg("order", () => order, (v, fromUser) => { order = v === "last" ? "last" : "first"; if (fromUser) save(ORDER_KEY, order); draw(); });
   const showGroup = seg("groupBy", () => groupBy, (v, fromUser) => { groupBy = v === "student" ? "student" : "day"; if (fromUser) save(GROUP_KEY, groupBy); draw(); });
@@ -313,6 +340,7 @@
 
   function drawLegend() {
     const legend = $("legend");
+    if (!legend) return;
     legend.textContent = "";
     for (const c of A.CATEGORIES) {
       const item = el("span");
@@ -322,7 +350,7 @@
       legend.append(item);
     }
     const f = el("span");
-    f.append(el("span", "sw flag"), "Flagged absence");
+    f.append(el("span", "sw flag"), rule === "present" ? "Flagged present mark" : "Flagged absence");
     legend.append(f);
   }
 
@@ -334,7 +362,12 @@
     if (students === null) { $("summary").textContent = `Loading ${G.label(years)}…`; return; }
     const allowed = new Set(students);
     const shown = days.map((d) => ({ ...d, students: d.students.filter((s) => allowed.has(s)) }));
-    const rows = A.inconsistencies(shown, { rule, absences, order, groupBy: byStudent() ? "student" : "day" }).map((r) => ({ ...r, name: N.person(r.name) || `Student ${r.userId}` }));
+    const all = A.inconsistencies(shown, { rule, absences, order, groupBy: byStudent() ? "student" : "day" }).map((r) => {
+      const mv = moves.get(markKey(r)) || [];
+      return { ...r, name: N.person(r.name) || `Student ${r.userId}`, moves: mv, explained: A.explainedBy(r, mv, rule).explained };
+    });
+    const hidden = signouts === "hide" ? all.filter((r) => r.explained).length : 0;
+    const rows = hidden ? all.filter((r) => !r.explained) : all;
 
     // Summary: students and student-days found.
     const s = $("summary");
@@ -343,22 +376,29 @@
     const scope = range === "today" ? "today" : `in ${RANGES[range][0]} (${plural(days.length, "school day")} loaded)`;
     if (busy && !days.length) s.textContent = run?.days.size > 1 ? `Loading ${run.days.size} days…` : "Loading today…";
     else if (!days.length && !busy) s.textContent = error ? "Couldn't load attendance" : range === "today" ? "No rolls today yet" : `No school days in ${RANGES[range][0]}`;
-    else { s.append(el("b", null, plural(people, "student")), ` · ${plural(rows.length, "day")} ${scope}`); }
+    else {
+      s.append(el("b", null, plural(people, "student")), ` · ${plural(rows.length, "day")} ${scope}`);
+      if (hidden) s.append(` · ${plural(hidden, "day")} explained by a sign-out hidden`);
+    }
 
     // Note: the "between" rule can't flag anything with only AM and PM.
     const note = $("note");
     const amPmOnly = days.length && days.every((d) => d.mode === "halfday");
-    note.hidden = !(amPmOnly && rule === "between");
-    note.textContent = note.hidden ? "" : "This school marks only AM and PM rolls, so no absence can be between two presents. Use \"Any mix\" to see students present for one half and absent for the other.";
+    note.hidden = !(amPmOnly && rule !== "any") && !movesError;
+    note.className = movesError ? "note err" : "note";
+    note.textContent = movesError ? `Couldn't load Arrivals & Departures, so sign-outs aren't shown: ${movesError}`
+      : note.hidden ? "" : "This school marks only AM and PM rolls, so no mark can be between two others. Use \"Any mix\" to see students present for one half and absent for the other.";
+    $("signoutsWrap").hidden = rule === "present";
 
-    $("groupWrap").hidden = range === "today";
+    $("groupWrap").hidden = range === "today" || view === "summary";
     results.textContent = "";
     if (!rows.length && days.length) {
       const card = el("div", "card");
       card.append(el("div", "empty", "No inconsistencies for these students and settings."));
       results.append(card);
     }
-    if (byStudent()) drawByStudent(rows);
+    if (view === "summary") { if (rows.length) drawSummary(rows); }
+    else if (byStudent()) drawByStudent(rows);
     else drawByDay(rows);
     queueMarks(rows);
     drawStatus();
@@ -425,7 +465,7 @@
       for (const r of list) {
         const tr = el("tr");
         const name = el("td", "name");
-        name.append(studentLink(r), whoLine(r));
+        name.append(studentLink(r), whoLine(r), moveLine(r));
         tr.append(name, el("td", "year", r.yearLevelString || "No year level"));
         markCells(tr, r, periods.length);
         tbody.append(tr);
@@ -457,7 +497,7 @@
             tr.append(name);
           }
           const date = el("td", "date", fmtShort(r.date));
-          date.append(whoLine(r));
+          date.append(whoLine(r), moveLine(r));
           tr.append(date);
           markCells(tr, r, periods.length);
           tbody.append(tr);
@@ -467,6 +507,83 @@
       card.append(h, t);
       $("results").append(card);
     }
+  }
+
+  // The line about Arrivals & Departures: each arrival or departure that day, and a chip when
+  // they explain every flagged absence. Empty when there are none.
+  function moveLine(r) {
+    const line = el("div", "mv");
+    if (!r.moves.length) return line;
+    if (r.explained) line.append(el("span", "okchip", "Explained by sign-out"));
+    line.append(r.moves.map((m) => (m.type === "arrival" ? `Arrived ${fmtTime(m.time)}${m.minutesLate ? ` · ${m.minutesLate} min late` : ""}`
+      : `Signed out ${fmtTime(m.time)}`) + (m.reason ? ` · ${m.reason}` : "")).join(" · "));
+    line.title = r.moves.map((m) => `${m.type === "arrival" ? "Arrived" : "Signed out"} ${fmtTime(m.time)}${m.reason ? ` · ${m.reason}` : ""}${m.by ? ` (entered by ${N.person(m.by)})` : ""}`).join("\n");
+    return line;
+  }
+
+  // --- summary --------------------------------------------------------------------------------
+  const TOP_STUDENTS = 25;
+
+  function countTable(list, total, { nameHead, teacher = false }) {
+    const t = el("table");
+    const head = el("tr");
+    head.append(el("th", null, nameHead));
+    if (teacher) head.append(el("th", null, "Teacher"));
+    head.append(el("th"), el("th", "num", "Marks"), el("th", "num", "%"));
+    const thead = el("thead");
+    thead.append(head);
+    const tbody = el("tbody");
+    const max = Math.max(1, ...list.map((x) => x.count));
+    for (const x of list) {
+      const tr = el("tr");
+      tr.append(el("td", null, x.name));
+      if (teacher) tr.append(el("td", "sub", x.teacher));
+      const bar = el("div", "bar");
+      bar.style.width = `${Math.round((x.count / max) * 100)}%`;
+      const cell = el("td", "barcell");
+      cell.append(bar);
+      tr.append(cell, el("td", "num", num(x.count)), el("td", "num", `${Math.round((x.count / Math.max(1, total)) * 100)}%`));
+      tbody.append(tr);
+    }
+    t.append(thead, tbody);
+    return t;
+  }
+
+  // Four cards: the most flagged students, then the flagged marks by period, weekday and class.
+  function drawSummary(rows) {
+    const markings = new Map([...marks].filter(([, v]) => v.state === "done").map(([k, v]) => [k, v.list]));
+    const sum = A.summariseInconsistencies(rows, markings);
+    const what = rule === "present" ? "with a present mark between absences" : "most skipped";
+    const card = (title, sub) => { const c = el("div", "card"); const h = el("h2", null, title); if (sub) h.append(el("span", "n", sub)); c.append(h); return c; };
+
+    const top = card("Most flagged students", `${plural(sum.students.length, "student")} · ${plural(sum.marks, "flagged mark")}`);
+    const t = el("table");
+    const head = el("tr");
+    head.append(el("th", null, "Student"), el("th", null, "Year"), el("th", "num", "Days"), el("th", "num", "Marks"), el("th", null, "Last"));
+    const thead = el("thead");
+    thead.append(head);
+    const tbody = el("tbody");
+    for (const st of sum.students.slice(0, TOP_STUDENTS)) {
+      const tr = el("tr");
+      const name = el("td", "name");
+      name.append(studentLink(st));
+      tr.append(name, el("td", "year", st.yearLevelString || "No year level"), el("td", "num", num(st.days)), el("td", "num", num(st.marks)), el("td", "sub", fmtShort(st.last)));
+      tbody.append(tr);
+    }
+    t.append(thead, tbody);
+    top.append(t);
+    if (sum.students.length > TOP_STUDENTS) top.append(el("div", "more", `and ${plural(sum.students.length - TOP_STUDENTS, "more student")}. The List view shows them all.`));
+
+    const grid = el("div", "sumgrid");
+    const periods = card(`Periods ${what}`);
+    periods.append(countTable(sum.periods, sum.marks, { nameHead: "Period" }));
+    const weekdays = card(`Days ${what}`);
+    weekdays.append(countTable(sum.weekdays, sum.marks, { nameHead: "Day" }));
+    const classes = card(`Classes ${what}`, sum.pending ? `Checking classes · ${num(rows.length - sum.pending)} of ${num(rows.length)} days` : "");
+    if (sum.classes.length) classes.append(countTable(sum.classes, sum.marks, { nameHead: "Class", teacher: true }));
+    else classes.append(el("div", "more", sum.pending ? "Loading the classes…" : "Compass gave no classes for these periods."));
+    grid.append(periods, weekdays);
+    $("results").append(top, grid, classes);
   }
 
   // --- who marked the flagged periods ----------------------------------------------------------
@@ -520,6 +637,7 @@
         students: { name: "Student list", state: "wait", detail: "" },
         grid: { name: "Attendance grid (names)", state: "wait", detail: "" },
         classes: { name: "Class list", state: "wait", detail: "", hidden: true }, // only at schools with periods
+        moves: { name: "Arrivals & departures", state: "wait", detail: "" },
       },
       days: new Map(dates.map((d) => [fmt(d), { state: "wait", detail: "", frac: 0, rolls: 0 }])),
     };
@@ -653,6 +771,7 @@
     run = newRun(dates);
     const ticker = setInterval(drawLoader, 1000); // the clock
     draw();
+    const movesDone = loadMoves(rangeDates()[0]);
     try {
       const res = await A.loadInconsistencyRange(dates, {
         onProgress: track,
@@ -661,6 +780,7 @@
       });
       for (const { date, error: e } of res.errors) failed.set(date, e);
       run.stopped = res.stopped;
+      await movesDone;
       lastUpdated = new Date();
     } catch (e) {
       error = e.message || String(e);
@@ -675,13 +795,50 @@
     }
   }
 
+  // The arrivals and departures from `since` to now (the same call as the Arrivals & Departures
+  // widget, paging back further). A failure leaves the page working without the notes.
+  async function loadMoves(since) {
+    const M = globalThis.CompassMovements;
+    const step = run.steps.moves;
+    if (!M) { step.state = "skip"; step.detail = "not available"; return; }
+    step.state = "busy";
+    drawLoaderSoon();
+    try {
+      const raw = await M.load(new Date(), { since });
+      const next = new Map();
+      for (const it of raw.items) {
+        const type = it.ct === 1 ? "arrival" : it.ct === 2 ? "departure" : "";
+        const time = M.parseDate(it.t, it.timestamp);
+        if (!type || !time || time < since) continue;
+        const k = `${Number(it.uid)}|${fmt(time)}`;
+        if (!next.has(k)) next.set(k, []);
+        next.get(k).push({ type, time, reason: M.reasonText(it.c), minutesLate: typeof it.minutesLate === "number" ? it.minutesLate : null,
+          by: String(it.userCreatorName || "").trim() });
+      }
+      for (const list of next.values()) list.sort((a, b) => a.time - b.time);
+      moves = next;
+      movesError = "";
+      step.state = "done";
+      step.detail = `${num(raw.items.length)} entries`;
+    } catch (e) {
+      movesError = e.message || String(e);
+      step.state = "fail";
+      step.detail = movesError;
+    }
+    drawLoaderSoon();
+    draw();
+  }
+
   $("stop").onclick = () => { stopRequested = true; again = false; drawLoader(); };
   // The print heading: what was printed (range, settings and filter) and when.
   function printInfo() {
     const dates = rangeDates();
     const span = range === "today" ? `Today, ${fmtLong(fmt(dates[0]))}` : `${RANGES[range][0][0].toUpperCase()}${RANGES[range][0].slice(1)} (${fmtShort(fmt(dates[0]))} to ${fmtShort(fmt(dates[dates.length - 1]))})`;
     const filter = G.isGroups(years) ? G.label(years) : Array.isArray(years) ? (years.length ? Y.label(years) : "No year groups") : "All year groups";
-    const parts = [span, filter, rule === "any" ? "Any mix" : "Absent between presents", absences === "all" ? "All absences" : "Unapproved absences"];
+    const ruleName = { between: "Absent between presents", any: "Any mix", present: "Present between absences" }[rule];
+    const parts = [span, filter, ruleName, absences === "all" ? "All absences" : "Unapproved absences"];
+    if (view === "summary") parts.push("Summary");
+    if (signouts === "hide" && rule !== "present") parts.push("Days explained by a sign-out hidden");
     if (busy) parts.push("Still loading: some days may be missing");
     parts.push(`Printed ${new Date().toLocaleString("en-AU", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}`);
     $("printinfo").textContent = parts.join(" · ");
@@ -694,12 +851,17 @@
   window.addEventListener("pagehide", offNames);
 
   try {
-    chrome.storage.local.get([RULE_KEY, ABSENCES_KEY, ORDER_KEY, GROUP_KEY, YEARS_KEY], (r) => {
+    chrome.storage.local.get([RULE_KEY, ABSENCES_KEY, ORDER_KEY, GROUP_KEY, SIGNOUTS_KEY, VIEW_KEY, YEARS_KEY], (r) => {
+      signouts = r?.[SIGNOUTS_KEY] === "hide" ? "hide" : "show";
+      showSignouts();
+      view = r?.[VIEW_KEY] === "summary" ? "summary" : "list";
+      showView();
       groupBy = r?.[GROUP_KEY] === "student" ? "student" : "day";
       showGroup();
       order = r?.[ORDER_KEY] === "last" ? "last" : "first";
       showOrder();
-      rule = r?.[RULE_KEY] === "any" ? "any" : "between";
+      rule = validRule(r?.[RULE_KEY]);
+      drawLegend();
       absences = r?.[ABSENCES_KEY] === "all" ? "all" : "unapproved";
       years = G.validSelection(r?.[YEARS_KEY] ?? null);
       showRule();

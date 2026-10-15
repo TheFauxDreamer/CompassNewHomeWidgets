@@ -838,11 +838,13 @@ globalThis.CompassAttendance = (() => {
   // (not marked, not expected, unknown, none) are skipped: they neither flag nor break a run.
   //   rule "between": an absence with a present mark before it and after it on the same day.
   //   rule "any":     at least one present mark and at least one absent mark.
+  //   rule "present": a present mark with an absence before it and after it (usually a marking
+  //                   mistake). Here flagged points at the present marks.
   // Gives [{ userId, name, yearLevelString, date, periods, mode, statuses, flagged }], newest
   // day first, then by year group (in school order), then by name: the first name (order "first",
   // the name as Compass writes it) or the surname (order "last"). With groupBy "student" the
   // rows come by year group, then by name, with each student's days together (newest first).
-  // flagged: the indexes of the absences that made the match.
+  // flagged: the indexes of the marks that made the match.
   function inconsistencies(days, { rule = "between", absences = "unapproved", order = "first", groupBy = "day" } = {}) {
     const isPresent = (c) => c === "present" || c === "offsite";
     const isAbsent = (c) => c === "unapproved" || (absences === "all" && c === "approved");
@@ -850,10 +852,12 @@ globalThis.CompassAttendance = (() => {
     for (const day of days) {
       for (const s of day.students) {
         const cats = s.statuses.map((x) => x?.category);
-        const presents = cats.map((c, i) => (isPresent(c) ? i : -1)).filter((i) => i >= 0);
-        if (!presents.length) continue;
-        const first = presents[0], last = presents[presents.length - 1];
-        const flagged = cats.map((c, i) => (isAbsent(c) && (rule === "any" || (i > first && i < last)) ? i : -1)).filter((i) => i >= 0);
+        // Flag the `target` marks that have an `around` mark before and after them ("any": anywhere).
+        const [target, around] = rule === "present" ? [isPresent, isAbsent] : [isAbsent, isPresent];
+        const arounds = cats.map((c, i) => (around(c) ? i : -1)).filter((i) => i >= 0);
+        if (!arounds.length) continue;
+        const first = arounds[0], last = arounds[arounds.length - 1];
+        const flagged = cats.map((c, i) => (target(c) && (rule === "any" || (i > first && i < last)) ? i : -1)).filter((i) => i >= 0);
         if (flagged.length) out.push({ ...s, date: day.date, periods: day.periods, mode: day.mode, flagged });
       }
     }
@@ -867,6 +871,81 @@ globalThis.CompassAttendance = (() => {
     return out.sort(groupBy === "student"
       ? (a, b) => byYear(a, b) || byName(a, b) || a.userId - b.userId || byDate(a, b)
       : (a, b) => byDate(a, b) || byYear(a, b) || byName(a, b));
+  }
+
+  // --- arrivals and departures (the Period inconsistencies page) --------------------------
+  // events: one student's arrivals and departures on one day, [{ type: "arrival" | "departure",
+  // time: Date }] in any order. Gives the times they were off site, [{ from, to }] in ms:
+  // before a first arrival (they came late), and from a departure until the next arrival (or
+  // the end of the day). from/to are -Infinity/Infinity at the open ends.
+  function offsiteSpans(events) {
+    const list = [...events].sort((a, b) => a.time - b.time);
+    const spans = [];
+    let off = list[0]?.type === "arrival" ? -Infinity : null;
+    for (const e of list) {
+      const t = e.time.getTime();
+      if (e.type === "arrival" && off !== null) { spans.push({ from: off, to: t }); off = null; }
+      else if (e.type === "departure" && off === null) off = t;
+    }
+    if (off !== null) spans.push({ from: off, to: Infinity });
+    return spans;
+  }
+
+  // Whether a sign-out or a late arrival explains a row from inconsistencies(): each flagged
+  // absence's period overlaps a time the student was off site. Not for the "present" rule (the
+  // flagged marks are present marks). Gives { explained, spans }.
+  function explainedBy(row, events, rule = "between") {
+    if (!events?.length || rule === "present") return { explained: false, spans: [] };
+    const spans = offsiteSpans(events);
+    const explained = row.flagged.length > 0 && row.flagged.every((i) => {
+      const p = row.periods[i];
+      return p && spans.some((s) => s.from < p.finish.getTime() && s.to > p.start.getTime());
+    });
+    return { explained, spans };
+  }
+
+  // --- summary (the Period inconsistencies page) -------------------------------------------
+  // rows: from inconsistencies(). markings: "uid|yyyy/mm/dd" -> [{ className, teacher } | null]
+  // (one for each period, from loadMarkings), for the rows that have loaded. Gives:
+  //   students: [{ userId, name, yearLevelString, days, marks, last }] most days first, then most
+  //             flagged marks, then by name
+  //   periods:  [{ name, count }] by period name, most first (ties in the day's order)
+  //   weekdays: [{ name, count }] Monday to Friday (and Saturday/Sunday if any), in week order
+  //   classes:  [{ name, teacher, count }] most first, from the markings that have loaded
+  //   marks:    the number of flagged marks; pending: the rows whose classes aren't loaded yet
+  const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  function summariseInconsistencies(rows, markings = new Map()) {
+    const students = new Map(), periods = new Map(), weekdays = new Map(), classes = new Map();
+    let marks = 0, pending = 0;
+    const bump = (map, key, make) => { const v = map.get(key) || make(); v.count++; map.set(key, v); return v; };
+    for (const r of rows) {
+      const s = students.get(r.userId) || { userId: r.userId, name: r.name, yearLevelString: r.yearLevelString, days: 0, marks: 0, last: r.date };
+      s.days++;
+      s.marks += r.flagged.length;
+      if (r.date > s.last) s.last = r.date;
+      students.set(r.userId, s);
+      const [y, m, d] = r.date.split("/").map(Number);
+      const wd = new Date(y, m - 1, d).getDay();
+      const known = markings.get(`${r.userId}|${r.date}`);
+      if (!known) pending++;
+      for (const i of r.flagged) {
+        marks++;
+        const p = r.periods[i];
+        bump(periods, p.name, () => ({ name: p.name, count: 0, order: i }));
+        bump(weekdays, wd, () => ({ name: WEEKDAY_NAMES[wd], count: 0, order: (wd + 6) % 7 }));
+        const c = known?.[i];
+        if (c?.className) bump(classes, `${c.className}|${c.teacher || ""}`, () => ({ name: c.className, teacher: c.teacher || "", count: 0 }));
+      }
+    }
+    const byCount = (a, b) => b.count - a.count;
+    const clean = (list) => list.map(({ order, ...x }) => x);
+    return {
+      students: [...students.values()].sort((a, b) => b.days - a.days || b.marks - a.marks || a.name.localeCompare(b.name)),
+      periods: clean([...periods.values()].sort((a, b) => byCount(a, b) || a.order - b.order)),
+      weekdays: clean([...weekdays.values()].sort((a, b) => a.order - b.order)),
+      classes: [...classes.values()].sort((a, b) => byCount(a, b) || a.name.localeCompare(b.name)),
+      marks, pending,
+    };
   }
 
   // --- trend (the "Attendance Trend" widget) -----------------------------------------------
@@ -921,7 +1000,7 @@ globalThis.CompassAttendance = (() => {
     return codes.map((c) => ({ ...c, group: CATEGORY_BY_STATUS_ID[c.id] || null }));
   }
 
-  return { load, loadDay, loadInconsistencyRange, inconsistencies, loadMarkings, forgetMarkings, teacherText, INCONSISTENCY_PAGE, schoolCodeList, GROUP_BY_COLOUR, loadRoster, loadTrend, trendSessions, enrolment, enrolmentNote, summarise, tally, unmarkedStudents, instanceIds, SESSION_KEY, yearLevels, filterByYears, filterByUsers, CATEGORIES, CATEGORY_BY_STATUS_ID, STATUSES };
+  return { load, loadDay, loadInconsistencyRange, inconsistencies, loadMarkings, forgetMarkings, teacherText, offsiteSpans, explainedBy, summariseInconsistencies, INCONSISTENCY_PAGE, schoolCodeList, GROUP_BY_COLOUR, loadRoster, loadTrend, trendSessions, enrolment, enrolmentNote, summarise, tally, unmarkedStudents, instanceIds, SESSION_KEY, yearLevels, filterByYears, filterByUsers, CATEGORIES, CATEGORY_BY_STATUS_ID, STATUSES };
 })();
 
 if (typeof module !== "undefined") module.exports = globalThis.CompassAttendance;
