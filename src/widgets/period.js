@@ -4,8 +4,10 @@
 // sets up with the gear button (for example, a primary school's teaching timetable).
 // A custom timetable can be shared: "Copy timetable code" puts it on the clipboard as one
 // line of text, and "Paste a code" in a colleague's widget loads it for them to Save.
+// "School timetable" reads the same code from the school's Compass News post, so every
+// staff member gets the timetable that an admin shares (docs/SCHOOL_TIMETABLE_POST.md).
 globalThis.CompassPeriodUI = (() => {
-  const AREA_HEIGHT = 170; // Fixed, so that the card does not change size.
+  const AREA_HEIGHT = 140; // Fixed, so that the card does not change size.
   const TICK_SECONDS = 30;
   const TICKS_KEY = "periodTicks"; // the labels under the timeline: "hours" (default) | "starts"
   const MIN_TICK_GAP = 9;          // % of the width between two period-start labels
@@ -41,7 +43,7 @@ globalThis.CompassPeriodUI = (() => {
       font-weight: 600; border-radius: 999px; padding: 1px 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
     .head.start .bubble { transform: translateX(-2px); }
     .head.end .bubble { transform: translateX(calc(-100% + 2px)); }
-    .empty { height: 100px; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; text-align: center; color: #5f6368; }
+    .empty { height: 75px; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; text-align: center; color: #5f6368; }
     .primary { background: #0E6CD9; color: #fff; font-weight: 600; border-radius: 999px; padding: 4px 12px; }
     .primary:hover { background: #0B5AB5; }
     .sk { background: linear-gradient(90deg, #EEF0F3 25%, #F6F7F9 50%, #EEF0F3 75%); background-size: 200% 100%;
@@ -77,7 +79,6 @@ globalThis.CompassPeriodUI = (() => {
     .newshelp ol { list-style: decimal; padding-left: 18px; }
     .newshelp ul { list-style: disc; padding-left: 16px; }
     .newshelp li { display: list-item; height: auto; gap: 0; line-height: 1.4; margin: 1px 0; overflow-wrap: anywhere; }
-    .newshelp .soon { color: #5f6368; font-style: italic; }
     .share input { flex: 1 1 160px; min-width: 0; box-sizing: border-box; padding: 2px 6px; border: 1px solid #dadce0;
       border-radius: 6px; font: inherit; font-size: 12px; font-family: ui-monospace, monospace; color: inherit; }
   `;
@@ -97,52 +98,10 @@ globalThis.CompassPeriodUI = (() => {
 
   // --- share codes ------------------------------------------------------------------------
   // A custom timetable packed into one line of text, so that a colleague can paste it into
-  // their own widget instead of typing every period again. Format: "CPT1." + base64url of
-  // {a: rows, d: {"1": rows, …}}, where each row is [name, "0845", "0930", 1 if break].
-  const CODE_PREFIX = "CPT1.";
-  const packRow = (r) => [r.name.trim(), r.start.replace(":", ""), r.finish.replace(":", ""), ...(r.kind === "break" ? [1] : [])];
-  const unpackTime = (t) => (typeof t === "string" && /^\d{4}$/.test(t) ? `${t.slice(0, 2)}:${t.slice(2)}` : "");
-  const unpackRow = (a) => {
-    if (!Array.isArray(a)) throw new Error("bad row");
-    return { name: String(a[0] ?? ""), start: unpackTime(a[1]), finish: unpackTime(a[2]), kind: a[3] ? "break" : "class" };
-  };
-  function encodeShare(custom) {
-    const data = { a: custom.all.map(packRow) };
-    const days = Object.entries(custom.days);
-    if (days.length) data.d = Object.fromEntries(days.map(([d, rows]) => [d, rows.map(packRow)]));
-    const bytes = new TextEncoder().encode(JSON.stringify(data));
-    let bin = "";
-    for (const b of bytes) bin += String.fromCharCode(b);
-    return CODE_PREFIX + btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  }
+  // their own widget instead of typing every period again. The format is in src/shared/periods.js.
+  const encodeShare = (custom) => globalThis.CompassPeriods.encodeCode(custom);
   // Returns { all, days } or throws an Error with a message for the user.
-  function decodeShare(text, validRow) {
-    const code = String(text || "").replace(/\s+/g, "");
-    if (!code) throw new Error("Paste a code first.");
-    if (!code.startsWith(CODE_PREFIX)) throw new Error("That isn't a timetable code.");
-    let data;
-    try {
-      const b64 = code.slice(CODE_PREFIX.length).replace(/-/g, "+").replace(/_/g, "/");
-      const bin = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
-      data = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
-    } catch {
-      throw new Error("The code is damaged or incomplete. Copy it again.");
-    }
-    try {
-      if (!data || !Array.isArray(data.a)) throw 0;
-      const all = data.a.map(unpackRow);
-      const days = {};
-      for (const [d, rows] of Object.entries(data.d || {})) {
-        if (!/^[1-5]$/.test(d) || !Array.isArray(rows)) throw 0;
-        days[d] = rows.map(unpackRow);
-      }
-      if (![all, ...Object.values(days)].every((rows) => rows.every(validRow))) throw 0;
-      if (!all.length && !Object.keys(days).length) throw new Error("That code has no periods in it.");
-      return { all, days };
-    } catch (e) {
-      throw e instanceof Error ? e : new Error("The code is damaged or incomplete. Copy it again.");
-    }
-  }
+  const decodeShare = (text) => globalThis.CompassPeriods.decodeCode(text);
   // Clipboard API first; fall back to a selected textarea (works without clipboard permission).
   async function copyText(text) {
     try { await navigator.clipboard.writeText(text); return true; } catch {}
@@ -350,6 +309,7 @@ globalThis.CompassPeriodUI = (() => {
     let tried = false;      // Save was clicked with a row that isn't valid
     let share = null;       // null, or { mode: "copy"|"paste", text, msg, ok } for the share row
     let newsHelp = false;   // the "Share with all staff (News post)" steps are open
+    let newsCheck = null;   // null, or { busy } | { ok, msg } for the School timetable status
     let ticksDraft = "hours";
 
     const rowsOf = () => (editDay === "all" ? draft.all : draft.days[editDay]);
@@ -393,10 +353,18 @@ globalThis.CompassPeriodUI = (() => {
 
     function drawSetup() {
       panel.textContent = "";
-      if (P.COMPASS_AVAILABLE) {
-        panel.append(segOf([["compass", "Compass periods"], ["custom", "Custom timetable"]], source, (v) => { source = v; drawSetup(); }));
-      }
-      if (source === "compass") {
+      panel.append(segOf([
+        ...(P.COMPASS_AVAILABLE ? [["compass", "Compass periods", "The period structure in Compass"]] : []),
+        ["news", "School timetable", "The timetable that the school shares in a Compass News post"],
+        ["custom", "Custom timetable", "A timetable that you type in"],
+      ], source, (v) => { source = v; drawSetup(); }));
+      if (source === "news") {
+        panel.append(el("div", "ynote", "The widget shows the timetable that the school shares in a Compass News post. " +
+          "When the post changes, the widget shows the new timetable within a few hours."));
+        panel.append(newsStatus());
+        panel.append(newsHelpLink());
+        if (newsHelp) panel.append(newsHelpBox());
+      } else if (source === "compass") {
         panel.append(el("div", "ynote", "The widget shows the school's default period structure from Compass (Configure > Period Structures). " +
           "Use a custom timetable when your teaching day is different, for example a primary school that marks AM/PM rolls."));
       } else {
@@ -452,6 +420,36 @@ globalThis.CompassPeriodUI = (() => {
       panel.append(actions);
     }
 
+    // Whether the widget can read the News post. Opens with the saved timetable, if any;
+    // "Check again" reads the post now.
+    function newsStatus() {
+      const box = el("div", "share");
+      if (!newsCheck) checkNews(false);
+      if (newsCheck.busy) box.append(el("span", "ynote", "Looking for the News post…"));
+      else box.append(el("span", newsCheck.ok ? "ok" : "err", newsCheck.msg));
+      const again = el("button", "link", "Check again");
+      again.type = "button";
+      again.disabled = !!newsCheck.busy;
+      again.onclick = () => checkNews(true);
+      box.append(again);
+      return box;
+    }
+    async function checkNews(fresh) {
+      const check = newsCheck = { busy: true };
+      if (fresh) drawSetup();
+      let result;
+      try {
+        const t = await P.newsTimetable({ fresh });
+        result = { ok: true, msg: `Found the post "${t.title || "untitled"}".` };
+      } catch (e) {
+        result = { ok: false, msg: e.message || String(e) };
+      }
+      if (fresh) load();
+      if (newsCheck !== check) return; // a newer check, or the panel was opened again
+      newsCheck = result;
+      if (!panel.hidden && source === "news") drawSetup();
+    }
+
     // How an admin shares the timetable with all staff through one Compass News post
     // (docs/SCHOOL_TIMETABLE_POST.md has the same steps).
     function newsHelpLink() {
@@ -463,8 +461,7 @@ globalThis.CompassPeriodUI = (() => {
     }
     function newsHelpBox() {
       const box = el("div", "newshelp");
-      box.append(el("p", null, "One staff-only news post shares the school's timetable with every staff member's widget."),
-        el("p", "soon", "Coming soon: the widget can't read the post yet. Until then, use Copy timetable code."));
+      box.append(el("p", null, "One staff-only news post shares the school's timetable with every staff member's widget."));
       const li = (...parts) => { const e = el("li"); e.append(...parts); return e; };
       const ol = el("ol");
       const sub = el("ul");
@@ -473,6 +470,7 @@ globalThis.CompassPeriodUI = (() => {
       ol.append(
         li("Set up the timetable above, then click Copy timetable code."),
         li("In Compass News, create a post:", sub),
+        li("Staff choose School timetable in their widget's setup."),
         li("To change the timetable, edit the same post and paste the new code. Don't make a second post."),
         li("To stop sharing, delete the post."),
       );
@@ -493,7 +491,7 @@ globalThis.CompassPeriodUI = (() => {
         load.type = "button";
         const apply = () => {
           try {
-            const t = decodeShare(input.value, P.validRow);
+            const t = decodeShare(input.value);
             draft = t;
             editDay = "all";
             tried = false;
@@ -575,6 +573,7 @@ globalThis.CompassPeriodUI = (() => {
         tried = false;
         share = null;
         newsHelp = false;
+        newsCheck = null;
         ticksDraft = tickMode;
         drawSetup();
       }

@@ -19,6 +19,11 @@
   // The Period inconsistencies page (src/pages/inconsistencies.js) is also on the homepage address.
   const ownPage = new URLSearchParams(location.search).has("ext");
   if (!isHome || ownPage || window.__compassAttendanceWidget) return;
+  // Impersonating a student or parent shows their homepage, where our cards can't load
+  // data, so show none. The page sets organisationUserBaseRole to the viewed account's role.
+  const STUDENT_ROLE = 1, PARENT_ROLE = 3;
+  const role = baseRole();
+  if (role === STUDENT_ROLE || role === PARENT_ROLE) return;
   window.__compassAttendanceWidget = true;
 
   const EDITING = new URLSearchParams(location.search).get("editing") === "true";
@@ -738,4 +743,13 @@
   new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
   window.addEventListener("resize", schedule);
   schedule();
+
+  // --- who is logged in -------------------------------------------------------------
+  function baseRole() {
+    for (const s of document.scripts) {
+      const m = /Compass\.organisationUserBaseRole\s*=\s*(\d+)/.exec(s.textContent || "");
+      if (m) return Number(m[1]);
+    }
+    return null;
+  }
 })();

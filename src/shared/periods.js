@@ -1,19 +1,26 @@
 // The periods of a school day, for the Current Period widget.
 //
-// Two sources:
+// Three sources:
 //   - Compass (the default): the school's default Period Structure for the year, from
 //     Configure > Period Structures. In a primary school this is often only AM and PM.
 //   - Custom: a timetable that the user types in the widget. Use it when the teaching
 //     timetable is different from the Compass structure (for example, a primary school
 //     that marks AM/PM rolls but teaches Literacy, Recess, Numeracy, Lunch…).
-// The custom timetable is for display only. Attendance never uses it.
+//   - News: the school's timetable, shared by an admin as a timetable code in a Compass
+//     News post (docs/SCHOOL_TIMETABLE_POST.md). Staff get the same timetable and see
+//     the admin's changes without pasting a new code.
+// The custom and News timetables are for display only. Attendance never uses them.
 //
 // A period is { name, start: Date, finish: Date, kind: "class" | "break" }.
 globalThis.CompassPeriods = (() => {
   const COMPASS_AVAILABLE = true;
 
-  const SOURCE_KEY = "periodSource";  // "compass" | "custom"
+  const SOURCE_KEY = "periodSource";  // "compass" | "custom" | "news"
   const CUSTOM_KEY = "customPeriods"; // { all: [row], days: { "1": [row], … "5": [row] } }
+  const NEWS_KEY = "newsPeriods";     // { custom: { all, days }, title, checked: ms }: the last News timetable
+  const NEWS_MAX_AGE = 6 * 60 * 60 * 1000; // read the News post again after this long
+  const NEWS_PAGE = 500;                   // the same page size as Compass's News page
+  const NEWS_PAGES = 4;                    // look through up to 2,000 expired posts
   // A saved row: { name, start: "08:45", finish: "09:45", kind: "class" | "break" }.
   // `all` is for Monday to Friday. A weekday in `days` (1 = Monday) has its own timetable.
 
@@ -42,8 +49,59 @@ globalThis.CompassPeriods = (() => {
       .sort((a, b) => a.start - b.start);
   }
 
+  // --- timetable codes ------------------------------------------------------------------
+  // A custom timetable packed into one line of text ("Copy timetable code" in the widget,
+  // and the body of the News post). Format: "CPT1." + base64url of
+  // {a: rows, d: {"1": rows, …}}, where each row is [name, "0845", "0930", 1 if break].
+  const CODE_PREFIX = "CPT1.";
+  const CODE_IN_TEXT = /CPT1\.[A-Za-z0-9_-]+/;
+  const packRow = (r) => [r.name.trim(), r.start.replace(":", ""), r.finish.replace(":", ""), ...(r.kind === "break" ? [1] : [])];
+  const unpackTime = (t) => (typeof t === "string" && /^\d{4}$/.test(t) ? `${t.slice(0, 2)}:${t.slice(2)}` : "");
+  const unpackRow = (a) => {
+    if (!Array.isArray(a)) throw new Error("bad row");
+    return { name: String(a[0] ?? ""), start: unpackTime(a[1]), finish: unpackTime(a[2]), kind: a[3] ? "break" : "class" };
+  };
+  function encodeCode(custom) {
+    const data = { a: custom.all.map(packRow) };
+    const days = Object.entries(custom.days);
+    if (days.length) data.d = Object.fromEntries(days.map(([d, rows]) => [d, rows.map(packRow)]));
+    const bytes = new TextEncoder().encode(JSON.stringify(data));
+    let bin = "";
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return CODE_PREFIX + btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  // Returns { all, days } or throws an Error with a message for the user.
+  function decodeCode(text) {
+    const code = String(text || "").replace(/\s+/g, "");
+    if (!code) throw new Error("Paste a code first.");
+    if (!code.startsWith(CODE_PREFIX)) throw new Error("That isn't a timetable code.");
+    let data;
+    try {
+      const b64 = code.slice(CODE_PREFIX.length).replace(/-/g, "+").replace(/_/g, "/");
+      const bin = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
+      data = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
+    } catch {
+      throw new Error("The code is damaged or incomplete. Copy it again.");
+    }
+    try {
+      if (!data || !Array.isArray(data.a)) throw 0;
+      const all = data.a.map(unpackRow);
+      const days = {};
+      for (const [d, rows] of Object.entries(data.d || {})) {
+        if (!/^[1-5]$/.test(d) || !Array.isArray(rows)) throw 0;
+        days[d] = rows.map(unpackRow);
+      }
+      if (![all, ...Object.values(days)].every((rows) => rows.every(validRow))) throw 0;
+      if (!all.length && !Object.keys(days).length) throw new Error("That code has no periods in it.");
+      return { all, days };
+    } catch (e) {
+      throw e instanceof Error ? e : new Error("The code is damaged or incomplete. Copy it again.");
+    }
+  }
+
   // --- Compass period structure (the same calls as Configure > Period Structures) ------
-  async function post(path, body) {
+  const DENIED = "Compass didn't give the period structure. Check you're still logged in, or use a custom timetable.";
+  async function post(path, body, denied = DENIED) {
     const res = await fetch(path, {
       method: "POST",
       credentials: "include",
@@ -51,7 +109,7 @@ globalThis.CompassPeriods = (() => {
       body: JSON.stringify(body),
     });
     if (res.redirected || res.status === 401 || res.status === 403) {
-      throw new Error("Compass didn't give the period structure. Check you're still logged in, or use a custom timetable.");
+      throw new Error(denied);
     }
     if (!res.ok) throw new Error(`Compass returned HTTP ${res.status}`);
     try { return await res.json(); }
@@ -133,12 +191,65 @@ globalThis.CompassPeriods = (() => {
     return fromRows(rows, date);
   }
 
+  // --- the school timetable in a Compass News post ------------------------------------
+  // The admin gives the post a finish date in the past, so it's an expired post and never
+  // shows in the feed. Expired posts come newest first; the newest one with a timetable
+  // code wins, so a second post replaces the first.
+  const NEWS_DENIED = "Compass didn't give the News posts. Check you're still logged in, or use a custom timetable.";
+  const codeIn = (html) => CODE_IN_TEXT.exec(String(html || "").replace(/<[^>]*>/g, " "))?.[0] || "";
+
+  async function findNewsPost() {
+    for (let page = 0; page < NEWS_PAGES; page++) {
+      const res = await post("/Services/Newsfeed.svc/GetAllExpiredNewsItems",
+        { start: page * NEWS_PAGE, limit: NEWS_PAGE, sort: "string", filterOptions: {} }, NEWS_DENIED);
+      const items = Array.isArray(res?.d?.data) ? res.d.data : null;
+      if (!items) throw new Error("Couldn't read the News posts from Compass.");
+      const item = items.find((x) => codeIn(x.Content1) || codeIn(x.Content2));
+      if (item) {
+        let custom;
+        try { custom = decodeCode(codeIn(item.Content1) || codeIn(item.Content2)); }
+        catch (e) { throw new Error(`The timetable code in the News post "${String(item.Title || "").trim()}" doesn't work: ${e.message}`); }
+        return { custom, title: String(item.Title || "").trim() };
+      }
+      if (items.length < NEWS_PAGE || (page + 1) * NEWS_PAGE >= Number(res.d.total || 0)) break;
+    }
+    throw new Error("Compass News has no post with a timetable code. Ask a Compass admin to share the timetable, or use a custom timetable.");
+  }
+
+  const stored = (key) => new Promise((res) => {
+    try { chrome.storage.local.get([key], (r) => res(r?.[key] ?? null)); } catch (_) { res(null); }
+  });
+
+  // The News timetable: { custom, title, checked }. It's kept for NEWS_MAX_AGE; when
+  // Compass can't be read, the last one is used. `fresh` reads the post again now.
+  let news = null; // { at: ms, promise }
+  function newsTimetable({ fresh = false } = {}) {
+    if (fresh || !news || Date.now() - news.at > NEWS_MAX_AGE) {
+      const promise = (async () => {
+        const last = await stored(NEWS_KEY);
+        const usable = last?.custom && typeof last.custom === "object";
+        if (!fresh && usable && Date.now() - Number(last.checked || 0) < NEWS_MAX_AGE) return last;
+        try {
+          const found = { ...(await findNewsPost()), checked: Date.now() };
+          save({ [NEWS_KEY]: found });
+          return found;
+        } catch (e) {
+          if (usable && !fresh) return last;
+          throw e;
+        }
+      })();
+      news = { at: Date.now(), promise };
+      promise.catch(() => { if (news?.promise === promise) news = null; }); // ask again after an error
+    }
+    return news.promise;
+  }
+
   function settings() {
     return new Promise((res) => {
       try {
         chrome.storage.local.get([SOURCE_KEY, CUSTOM_KEY], (r) => res({
-          // Compass by default; "custom" once the user saves a custom timetable.
-          source: COMPASS_AVAILABLE && r?.[SOURCE_KEY] !== "custom" ? "compass" : "custom",
+          // Compass by default; "custom" or "news" once the user saves that source.
+          source: r?.[SOURCE_KEY] === "news" ? "news" : COMPASS_AVAILABLE && r?.[SOURCE_KEY] !== "custom" ? "compass" : "custom",
           custom: r?.[CUSTOM_KEY] && typeof r[CUSTOM_KEY] === "object" ? r[CUSTOM_KEY] : { all: [], days: {} },
         }));
       } catch (_) { res({ source: COMPASS_AVAILABLE ? "compass" : "custom", custom: { all: [], days: {} } }); }
@@ -148,7 +259,8 @@ globalThis.CompassPeriods = (() => {
   // The periods to show for the day of `date`: { source, periods }.
   async function display(date) {
     const s = await settings();
-    const periods = s.source === "compass" ? await compass(date) : fromRows(rowsFor(s.custom, date), date);
+    const periods = s.source === "compass" ? await compass(date)
+      : fromRows(rowsFor(s.source === "news" ? (await newsTimetable()).custom : s.custom, date), date);
     return { source: s.source, periods, note: periods.note || "" };
   }
 
@@ -183,7 +295,7 @@ globalThis.CompassPeriods = (() => {
 
   return {
     COMPASS_AVAILABLE, WEEKDAYS, compass, display, nextDay, current, settings, saveSource, saveCustom, onChange,
-    validRow, rowsFor, fromRows,
+    validRow, rowsFor, fromRows, encodeCode, decodeCode, newsTimetable,
   };
 })();
 

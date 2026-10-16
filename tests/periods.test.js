@@ -36,3 +36,53 @@ test("current finds the period on now, the next one and the one before", () => {
   assert.deepEqual(names(P.current(periods, at(12, 20))), [null, "PM", "AM"]);
   assert.deepEqual(names(P.current(periods, at(15, 30))), [null, null, "PM"]);
 });
+
+// --- the school timetable in a Compass News post -------------------------------------------
+{
+  const { mockFetch, store } = require("./load.js");
+  const timetable = { all: [row("Literacy", "08:45", "09:45"), row("Recess", "10:45", "11:05", "break")], days: {} };
+  const newsItem = (Title, Content1) => ({ NewsItemId: Title, Title, Content1, Content2: "" });
+
+  test("the News timetable comes from the newest expired post with a code, with HTML around it", async () => {
+    const code = P.encodeCode(timetable);
+    const calls = mockFetch({
+      "Newsfeed.svc/GetAllExpiredNewsItems": () => ({ d: { total: 3, data: [
+        newsItem("Sports carnival at Midgar Academy", "<p>Bring a hat.</p>"),
+        newsItem("Period timetable", `<p>For the widget:</p><p>${code}</p><p>Thanks, Tifa Lockhart</p>`),
+        newsItem("Period timetable (old)", `<p>${P.encodeCode({ all: [row("AM", "08:45", "12:00")], days: {} })}</p>`),
+      ] } }),
+    });
+    const t = await P.newsTimetable({ fresh: true });
+    assert.equal(t.title, "Period timetable");
+    assert.deepEqual(t.custom, timetable);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(store.get("newsPeriods").custom, timetable);
+  });
+
+  test("the News source shows the post's timetable, and keeps it when Compass can't be read", async () => {
+    store.set("periodSource", "news");
+    const res = await P.display(new Date(2026, 9, 13)); // Tuesday
+    assert.equal(res.source, "news");
+    assert.deepEqual(res.periods.map((p) => p.name), ["Literacy", "Recess"]);
+    mockFetch({ "Newsfeed.svc": () => { throw new Error("offline"); } });
+    store.set("newsPeriods", { ...store.get("newsPeriods"), checked: 0 }); // too old: ask again
+    const t = await P.newsTimetable({ fresh: false });
+    assert.deepEqual(t.custom, timetable);
+    store.delete("periodSource");
+  });
+
+  test("the News lookup pages through expired posts, then says when there is no post", async () => {
+    const calls = mockFetch({
+      "Newsfeed.svc/GetAllExpiredNewsItems": (body) => ({ d: { total: 600, data: body.start === 0
+        ? Array.from({ length: 500 }, (_, i) => newsItem(`Post ${i}`, "<p>Kalm excursion</p>"))
+        : [newsItem("Rocket Town visit", "<p>No code here</p>")] } }),
+    });
+    await assert.rejects(P.newsTimetable({ fresh: true }), /no post with a timetable code/);
+    assert.deepEqual(calls.map((c) => c.body.start), [0, 500]);
+  });
+
+  test("a damaged code in the News post gives a message", async () => {
+    mockFetch({ "Newsfeed.svc/GetAllExpiredNewsItems": () => ({ d: { total: 1, data: [newsItem("Period timetable", "<p>CPT1.abc</p>")] } }) });
+    await assert.rejects(P.newsTimetable({ fresh: true }), /"Period timetable" doesn't work: The code is damaged/);
+  });
+}

@@ -14,6 +14,8 @@
 // MutationObserver applies the changes again. Compass keeps the full name, so its row editor
 // still shows the " | " parts. The due dates come from the same call as the widget
 // (TaskService.svc/GetTaskItems), or else from the Due Date cell's text.
+// ExtJS sizes the widget before the sub-tasks are added, so when the rows' height changes this
+// fires "ext-task-relayout" and task-relayout.js (in the page's world) has ExtJS size it again.
 
 // --- due dates (no page needed, so the tests can load these) ------------------------------
 globalThis.CompassTaskExtras = (() => {
@@ -113,7 +115,7 @@ globalThis.CompassTaskExtras = (() => {
 
   // --- the task list from Compass: id -> { due, done } ----------------------------------
   let tasks = new Map();
-  let loadedAt = 0, loading = null, lastSignature = "";
+  let loadedAt = 0, loading = null, lastSignature = "", lastHeight = 0;
   function loadTasks() {
     loading ||= fetch("/Services/TaskService.svc/GetTaskItems?sessionstate=readonly", {
       method: "POST",
@@ -214,7 +216,10 @@ globalThis.CompassTaskExtras = (() => {
       if (Date.now() - loadedAt >= RELOAD_SECONDS * 1000) {
         lastSignature = signature;
         loadTasks().then(apply);
-      } else schedule(RELOAD_SECONDS * 1000);
+      } else if (!reloadTimer) {
+        // Its own timer, so the rows are still done again within 100ms of each redraw.
+        reloadTimer = setTimeout(() => { reloadTimer = 0; apply(); }, RELOAD_SECONDS * 1000);
+      }
     }
     for (const row of rows) {
       const id = row.dataset.recordid;
@@ -223,9 +228,22 @@ globalThis.CompassTaskExtras = (() => {
       applySubtasks(id, inner);
       applyDue(row, id, inner, now);
     }
+    for (const row of rows) rowSizes?.observe(row);
+    checkHeight(rows);
   }
 
-  let pending = 0;
+  // Only when the rows' height changes, so the new layout (which can draw rows again) can't loop.
+  // The ResizeObserver catches rows that grow later, e.g. when a sub-task wraps onto a new line.
+  function checkHeight(rows = [...document.querySelectorAll(ROWS)]) {
+    const height = rows.reduce((sum, r) => sum + r.offsetHeight, 0);
+    if (rows.length && height !== lastHeight) {
+      lastHeight = height;
+      document.dispatchEvent(new CustomEvent("ext-task-relayout"));
+    }
+  }
+  const rowSizes = typeof ResizeObserver === "function" ? new ResizeObserver(() => checkHeight()) : null;
+
+  let pending = 0, reloadTimer = 0;
   function schedule(ms = 100) { if (!pending) pending = setTimeout(() => { pending = 0; apply(); }, ms); }
   const observer = new MutationObserver((list) => {
     // Ignore the changes this script makes inside its own lists.
